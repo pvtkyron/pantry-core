@@ -2655,11 +2655,11 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 6708,
+      "packed_size": 6700,
       "packet_type": 35,
       "path": "auth/subscription.pak",
-      "plain_size": 6638,
-      "sha256": "231a0e458b696663aa43c36593a5b6ebfd989b4c02670fd2430d02a585d9a3c5",
+      "plain_size": 6630,
+      "sha256": "05796b693498fa52a0ca562229c1e0195d75577dc01994df2e6fb3a873b9c396",
       "source": "auth/subscription.main.json"
     },
     {
@@ -3949,5 +3949,5 @@
     "SrcVersion.ini"
   ],
   "schema": 1,
-  "version": "b9c117ba0e891f872c1365c2fcda81a0823869d8"
+  "version": "3d9a79e69830c6c74e3a5190d815931b3185cc5e"
 }
