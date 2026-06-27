@@ -3745,29 +3745,29 @@
     {
       "mode": "raw",
       "path": "lib/4.4/libvampy.so",
-      "sha256": "d9659e6cea0449ca57b8a9c36a8cc578da7bec11678b9f378bf5aaca277865ed",
-      "size": 1044700,
+      "sha256": "7a3dd0fe271a376f74757bc142cc30bd4acd0b23f6777d9b617eb12d80a30613",
+      "size": 1037712,
       "source": "lib/4.4/libvampy.so"
     },
     {
       "mode": "raw",
       "path": "lib/4.4/libvampy64.so",
-      "sha256": "19f38d763f281cab1d1c496224ab123ebfe1ac8c0b3c52340a84511dd1ba8c23",
-      "size": 1324528,
+      "sha256": "4cc0692c35d0108fe9b08ba52da446dba172b2cd2d6ff600add3c7fe44be3c8a",
+      "size": 1323080,
       "source": "lib/4.4/libvampy64.so"
     },
     {
       "mode": "raw",
       "path": "lib/4.4/libvampyi.so",
-      "sha256": "d9659e6cea0449ca57b8a9c36a8cc578da7bec11678b9f378bf5aaca277865ed",
-      "size": 1044700,
+      "sha256": "7a3dd0fe271a376f74757bc142cc30bd4acd0b23f6777d9b617eb12d80a30613",
+      "size": 1037712,
       "source": "lib/4.4/libvampyi.so"
     },
     {
       "mode": "raw",
       "path": "lib/4.4/libvampyi64.so",
-      "sha256": "19f38d763f281cab1d1c496224ab123ebfe1ac8c0b3c52340a84511dd1ba8c23",
-      "size": 1324528,
+      "sha256": "4cc0692c35d0108fe9b08ba52da446dba172b2cd2d6ff600add3c7fe44be3c8a",
+      "size": 1323080,
       "source": "lib/4.4/libvampyi64.so"
     },
     {
@@ -3949,5 +3949,5 @@
     "SrcVersion.ini"
   ],
   "schema": 1,
-  "version": "bb3cdc703d963a701221d3b3e00bc474984a0655"
+  "version": "9a0186821e7eacaba07372c19ed2e1d5a2295626"
 }
