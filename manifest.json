@@ -3910,11 +3910,11 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 29073,
+      "packed_size": 15665,
       "packet_type": 35,
       "path": "lua/twitter.pak",
-      "plain_size": 28783,
-      "sha256": "a825ddf39fffb09848c1d9cbbab8477ff58ecc1e8b1c0354d6127a84beb8ed99",
+      "plain_size": 15505,
+      "sha256": "d043d62e3e2e75cf4139c6e947dc1c63ae2e7662d746775392bd355d97063856",
       "source": "lua_src/twitter.lua"
     },
     {
@@ -3949,5 +3949,5 @@
     "SrcVersion.ini"
   ],
   "schema": 1,
-  "version": "e247a933b5583c39966221de420b861920875ce6"
+  "version": "599d89400f5bada74c778c0a1c6ab60f99f42a8d"
 }
