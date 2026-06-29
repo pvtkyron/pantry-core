@@ -3830,6 +3830,16 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
+      "packed_size": 46674,
+      "packet_type": 35,
+      "path": "lua/server_core.pak",
+      "plain_size": 46214,
+      "sha256": "4fa7683a634dca90b9a6934c38cc33a222de18fde26548267e3cc59ddfc739fc",
+      "source": "lua_src/server_core.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
       "packed_size": 14570,
       "packet_type": 35,
       "path": "lua/skin_avatar.pak",
@@ -3916,16 +3926,6 @@
       "plain_size": 22229,
       "sha256": "f0f51d7cf005369dc8afb6390d6c86aa18ecdefcd0419e17b63f3bba3f6a4d3f",
       "source": "lua_src/twitter.lua"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 46674,
-      "packet_type": 35,
-      "path": "lua/vampy_core.pak",
-      "plain_size": 46214,
-      "sha256": "85ffb43f88c153aaff98c4b8df1d64236ecae91a8d7ad57e6b088d421ab4cba3",
-      "source": "lua_src/vampy_core.lua"
     }
   ],
   "format": "PacketEnvelopeChunked",
@@ -3949,5 +3949,5 @@
     "SrcVersion.ini"
   ],
   "schema": 1,
-  "version": "68c29bea5125941e8f63a77fa51aecc701c489ff"
+  "version": "9a2078558a2d55bed97d922faa340f8af47b941a"
 }
