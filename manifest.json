@@ -95,11 +95,11 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 34450,
+      "packed_size": 34531,
       "packet_type": 35,
       "path": "assest/Skins.pak",
-      "plain_size": 34110,
-      "sha256": "ab53515d601784af218436362f92d5c00a5348afb371c73f68c1b9b3ce67f94e",
+      "plain_size": 34191,
+      "sha256": "20634c69539bd81e4ef4537cadab62c2a1a4b98e6f2a5917d1fb7fdf64481292",
       "source": "assest/Skins.json"
     },
     {
@@ -3949,5 +3949,5 @@
     "SrcVersion.ini"
   ],
   "schema": 1,
-  "version": "e65a99cd14e7a4f1bae57af0584b9e6a4ee5b49a"
+  "version": "410fbac8b4e177b99ad3a60b732571e13ea02fa4"
 }
