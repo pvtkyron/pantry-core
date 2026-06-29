@@ -3824,7 +3824,7 @@
       "packet_type": 35,
       "path": "lua/scripts.pak",
       "plain_size": 932,
-      "sha256": "f592353cf9a65a4089e541ded5daefe468be6329a3db04e720d0f89c8caafb6c",
+      "sha256": "37f5fb66b14b5c66eaa3d53bacc5b49245b0c6598fa44b28925156f476f66067",
       "source": "lua_src/scripts.json"
     },
     {
@@ -3949,5 +3949,5 @@
     "SrcVersion.ini"
   ],
   "schema": 1,
-  "version": "9a2078558a2d55bed97d922faa340f8af47b941a"
+  "version": "131ecd334230b2d9e37cc5f02aac1cf41336d746"
 }
