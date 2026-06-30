@@ -3927,42 +3927,173 @@
     "pair_size": 4,
     "sig_xor": 46774
   },
-  "rules": {
-    "include": [
-      "SrcVersion.ini",
-      "auth/",
-      "dist/",
-      "lua_src/",
-      "client/",
-      "assest/",
-      "Font/",
-      "img/",
-      "lib/"
-    ],
-    "map": [
-      "auth/subscription.main.json=>auth/subscription.json",
-      "lua_src/=>lua/",
-      "auth/subscription.main.json=>auth/subscription.json",
-      "lua_src/=>lua/"
-    ],
-    "raw": [
-      "lib/"
-    ],
-    "required_outputs": [
-      "SrcVersion.pak",
-      "auth/subscription.pak",
-      "dist/InputHost.pak"
-    ],
-    "required_sources": [
-      "SrcVersion.ini",
-      "auth/subscription.main.json",
-      "dist/InputHost.dex",
-      "lua_src/"
-    ],
-    "skip": [
-      "lib/4.4/"
-    ]
-  },
-  "schema": 1,
-  "version": "ab0c14ab9356f34b494bd35e78cd656dfd07544a"
+  "required_outputs": [
+    "SrcVersion.pak",
+    "auth/subscription.pak",
+    "dist/InputHost.pak"
+  ],
+  "required_sources": [
+    "lua_src/",
+    "SrcVersion.ini",
+    "auth/subscription.main.json",
+    "dist/InputHost.dex"
+  ],
+  "rules": [
+    {
+      "dst": "SrcVersion.pak",
+      "mode": "pak",
+      "req_out": true,
+      "req_src": true,
+      "src": "SrcVersion.ini"
+    },
+    {
+      "dst": "auth/subscription.pak",
+      "mode": "pak",
+      "req_out": true,
+      "req_src": true,
+      "src": "auth/subscription.main.json"
+    },
+    {
+      "dst": "dist/InputHost.pak",
+      "mode": "pak",
+      "req_out": true,
+      "req_src": true,
+      "src": "dist/InputHost.dex"
+    },
+    {
+      "dst": "lua/",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "lua_src/"
+    },
+    {
+      "dst": "client/",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "client/"
+    },
+    {
+      "dst": "assest/",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "assest/"
+    },
+    {
+      "dst": "Font/",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "Font/"
+    },
+    {
+      "dst": "img/",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "img/"
+    },
+    {
+      "dst": "lib/",
+      "mode": "raw",
+      "req_out": false,
+      "req_src": false,
+      "src": "lib/"
+    },
+    {
+      "dst": "",
+      "mode": "skip",
+      "req_out": false,
+      "req_src": false,
+      "src": "lib/4.4/"
+    },
+    {
+      "dst": "SrcVersion.ini",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "SrcVersion.ini"
+    },
+    {
+      "dst": "auth/",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "auth/"
+    },
+    {
+      "dst": "dist/",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "dist/"
+    },
+    {
+      "dst": "lua/",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "lua_src/"
+    },
+    {
+      "dst": "client/",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "client/"
+    },
+    {
+      "dst": "assest/",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "assest/"
+    },
+    {
+      "dst": "Font/",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "Font/"
+    },
+    {
+      "dst": "img/",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "img/"
+    },
+    {
+      "dst": "lib/",
+      "mode": "raw",
+      "req_out": false,
+      "req_src": false,
+      "src": "lib/"
+    },
+    {
+      "dst": "auth/subscription.json",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "auth/subscription.main.json"
+    },
+    {
+      "dst": "lua/",
+      "mode": "pak",
+      "req_out": false,
+      "req_src": false,
+      "src": "lua_src/"
+    },
+    {
+      "dst": "",
+      "mode": "skip",
+      "req_out": false,
+      "req_src": false,
+      "src": "lib/4.4/"
+    }
+  ],
+  "schema": 2,
+  "version": "e7d342c1908613eb3390f8e1fb77d938905012e3"
 }
