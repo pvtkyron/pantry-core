@@ -1,6 +1,6 @@
 {
   "channel": "live",
-  "file_count": 378,
+  "file_count": 393,
   "files": [
     {
       "max_frame": 1024,
@@ -55,11 +55,11 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 513,
+      "packed_size": 517,
       "packet_type": 35,
       "path": "SrcVersion.pak",
-      "plain_size": 503,
-      "sha256": "55ec21417636d98e35b12b08d907bbba0725b07b40482507aeadfbb9eb6d55a8",
+      "plain_size": 507,
+      "sha256": "caa2f93fd46714f5c6e7944d4bee613939cae75bce28aa49577e4ea281c831b5",
       "source": "SrcVersion.ini"
     },
     {
@@ -3766,6 +3766,156 @@
       "sha256": "550ccb66f3d7ac3cffd2907e849a1cab9229d16c416d22bfc30329195b3274be",
       "size": 45,
       "source": "lib/readme.md"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 2423,
+      "packet_type": 35,
+      "path": "lua/BackToLobby.pak",
+      "plain_size": 2393,
+      "sha256": "0b91105e4faf91f8084ddcddcea1ecd9ed991d6b4a7b52990427862f83506f45",
+      "source": "lua_src/BackToLobby.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 36916,
+      "packet_type": 35,
+      "path": "lua/aimbot.pak",
+      "plain_size": 36546,
+      "sha256": "2f5b68ee5c27f7a164686d2499e2199379780bcc8f9cd803cbd13ea434202d11",
+      "source": "lua_src/aimbot.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 16158,
+      "packet_type": 35,
+      "path": "lua/gfx.pak",
+      "plain_size": 15998,
+      "sha256": "6c369cbe200df7ca3e92fcc406cce0029da165bd2e6f646b9c0762f20ed14f61",
+      "source": "lua_src/gfx.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 34878,
+      "packet_type": 35,
+      "path": "lua/hudLabel.pak",
+      "plain_size": 34528,
+      "sha256": "a93cd6c65e5f07513007deaa9e55124aaa5565a2a4b5a41191be481877c0846c",
+      "source": "lua_src/hudLabel.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 942,
+      "packet_type": 35,
+      "path": "lua/scripts.pak",
+      "plain_size": 932,
+      "sha256": "37f5fb66b14b5c66eaa3d53bacc5b49245b0c6598fa44b28925156f476f66067",
+      "source": "lua_src/scripts.json"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 46674,
+      "packet_type": 35,
+      "path": "lua/server_core.pak",
+      "plain_size": 46214,
+      "sha256": "4fa7683a634dca90b9a6934c38cc33a222de18fde26548267e3cc59ddfc739fc",
+      "source": "lua_src/server_core.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 14570,
+      "packet_type": 35,
+      "path": "lua/skin_avatar.pak",
+      "plain_size": 14420,
+      "sha256": "412ccdb2474628cf26c36e5a93b89fb6e822cf244c9c9899afef0b5f93c4ab43",
+      "source": "lua_src/skin_avatar.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 7450,
+      "packet_type": 35,
+      "path": "lua/skin_commands.pak",
+      "plain_size": 7370,
+      "sha256": "ff0260450155bc9a3268c05f1c0f37a0230cd4fb42e7673d87d049f625ae17ba",
+      "source": "lua_src/skin_commands.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 14885,
+      "packet_type": 35,
+      "path": "lua/skin_core.pak",
+      "plain_size": 14735,
+      "sha256": "9cf0641047064911fa65dc07c441a6586b5de1c6a5a70eca68e7d6fbfe46bc84",
+      "source": "lua_src/skin_core.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 2332,
+      "packet_type": 35,
+      "path": "lua/skin_deadbox.pak",
+      "plain_size": 2302,
+      "sha256": "aa5fcd6628164cbc68457c5249163a9fb0e5f73b8667fc18893f895ad59a949e",
+      "source": "lua_src/skin_deadbox.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 5502,
+      "packet_type": 35,
+      "path": "lua/skin_pet.pak",
+      "plain_size": 5442,
+      "sha256": "ef83d8d08e3b55528b6a56603a4ade4008145f534c96ea06581009c594d681fc",
+      "source": "lua_src/skin_pet.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 10646,
+      "packet_type": 35,
+      "path": "lua/skin_sync.pak",
+      "plain_size": 10536,
+      "sha256": "174d4cd96093249a57f88625a01efdca274e2a0a4c511d3a0a31e49fef02fabf",
+      "source": "lua_src/skin_sync.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 4591,
+      "packet_type": 35,
+      "path": "lua/skin_vehicle.pak",
+      "plain_size": 4541,
+      "sha256": "2cc285923339c1a4bd2f4624fc992cd6d5d30e07c0e3df514a0a63278061a7fb",
+      "source": "lua_src/skin_vehicle.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 17315,
+      "packet_type": 35,
+      "path": "lua/skin_weapon.pak",
+      "plain_size": 17145,
+      "sha256": "8b922ef5c4e973ea3f8cb006766342ac8b779e22ce9a4d806d44a9000d4254cf",
+      "source": "lua_src/skin_weapon.lua"
+    },
+    {
+      "max_frame": 1024,
+      "mode": "packet_envelope",
+      "packed_size": 22441,
+      "packet_type": 35,
+      "path": "lua/twitter.pak",
+      "plain_size": 22221,
+      "sha256": "2dae4f687967ce2a33d4e42547a29c89a1dce9df16e9646377a90fe347e5a2e1",
+      "source": "lua_src/twitter.lua"
     }
   ],
   "format": "PacketEnvelopeChunked",
@@ -3814,7 +3964,7 @@
       "need_out": false,
       "need_src": false,
       "out": "lua/",
-      "src": "lua/"
+      "src": "lua_src/"
     },
     {
       "mode": "pak",
@@ -3853,5 +4003,5 @@
     }
   ],
   "schema": 3,
-  "version": "4b8f10c9ad34de8d856f764179f169d59026ec33"
+  "version": "9b8eea8b230187e16728b632da7294382bc7481c"
 }
