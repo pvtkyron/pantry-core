@@ -2600,7 +2600,7 @@
       "path": "auth/subscription.pak",
       "plain_size": 6041,
       "sha256": "fbe828ebf38cebe8c174f47660f833cbb8c385cfd20da6e98e2ac2361562bee7",
-      "source": "auth/subscription.main.json"
+      "source": "auth/subscription.json"
     },
     {
       "max_frame": 1024,
@@ -2954,81 +2954,74 @@
   ],
   "required_sources": [
     "SrcVersion.ini",
-    "auth/subscription.main.json",
+    "auth/subscription.json",
     "dist/InputHost.dex"
   ],
   "rules": [
     {
-      "dst": "SrcVersion.pak",
       "mode": "pak",
-      "req_out": true,
-      "req_src": true,
+      "need_out": true,
+      "need_src": true,
+      "out": "SrcVersion.pak",
       "src": "SrcVersion.ini"
     },
     {
-      "dst": "auth/subscription.pak",
       "mode": "pak",
-      "req_out": true,
-      "req_src": true,
-      "src": "auth/subscription.main.json"
+      "need_out": true,
+      "need_src": true,
+      "out": "auth/subscription.pak",
+      "src": "auth/subscription.json"
     },
     {
-      "dst": "dist/InputHost.pak",
       "mode": "pak",
-      "req_out": true,
-      "req_src": true,
+      "need_out": true,
+      "need_src": true,
+      "out": "dist/InputHost.pak",
       "src": "dist/InputHost.dex"
     },
     {
-      "dst": "lua/",
       "mode": "pak",
-      "req_out": false,
-      "req_src": false,
-      "src": "lua_src/"
+      "need_out": false,
+      "need_src": false,
+      "out": "lua/",
+      "src": "lua/"
     },
     {
-      "dst": "client/",
       "mode": "pak",
-      "req_out": false,
-      "req_src": false,
+      "need_out": false,
+      "need_src": false,
+      "out": "client/",
       "src": "client/"
     },
     {
-      "dst": "assest/",
       "mode": "pak",
-      "req_out": false,
-      "req_src": false,
+      "need_out": false,
+      "need_src": false,
+      "out": "assest/",
       "src": "assest/"
     },
     {
-      "dst": "hamburger/resources.hbg:Font/",
       "mode": "hbg",
-      "req_out": true,
-      "req_src": false,
+      "need_out": true,
+      "need_src": false,
+      "out": "hamburger/resources.hbg:Font/",
       "src": "Font/"
     },
     {
-      "dst": "hamburger/resources.hbg:img/",
       "mode": "hbg",
-      "req_out": false,
-      "req_src": false,
+      "need_out": false,
+      "need_src": false,
+      "out": "hamburger/resources.hbg:img/",
       "src": "img/"
     },
     {
-      "dst": "lib/",
       "mode": "raw",
-      "req_out": false,
-      "req_src": false,
+      "need_out": false,
+      "need_src": false,
+      "out": "lib/",
       "src": "lib/"
-    },
-    {
-      "dst": "",
-      "mode": "skip",
-      "req_out": false,
-      "req_src": false,
-      "src": "lib/4.4/"
     }
   ],
-  "schema": 2,
-  "version": "ed3b76885e7af0509a1945fbf6c4dfb2188baf89"
+  "schema": 3,
+  "version": "be236e153ad30985ec1461f2ed4d1464fde6faa7"
 }
