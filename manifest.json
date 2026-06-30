@@ -1,65 +1,15 @@
 {
   "channel": "live",
-  "file_count": 393,
+  "file_count": 284,
   "files": [
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 125795,
-      "packet_type": 35,
-      "path": "Font/font_awesome.pak",
-      "plain_size": 124565,
-      "sha256": "103a4be9b4edf8fe6f047d8683b51be17996bfd185f6724451f0a036a30eab01",
-      "source": "Font/font_awesome.ttf"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 2052902,
-      "packet_type": 35,
-      "path": "Font/font_chinese.pak",
-      "plain_size": 2032852,
-      "sha256": "d5b83d60bd2472732e30e53e52d7d2a93e190a7ed9170f68f7170e06cf646548",
-      "source": "Font/font_chinese.ttf"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 61256,
-      "packet_type": 35,
-      "path": "Font/font_english.pak",
-      "plain_size": 60656,
-      "sha256": "bb39bad9fef1f74b6c28e50cae21c04784ade0e2bdbec58380a2bf17d66ec035",
-      "source": "Font/font_english.ttf"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 894204,
-      "packet_type": 35,
-      "path": "Font/font_japanese.pak",
-      "plain_size": 885464,
-      "sha256": "3868b364045f365db33cb336f04f6bb5e879967aa9e04322651f66678e51ff4a",
-      "source": "Font/font_japanese.ttf"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 689034,
-      "packet_type": 35,
-      "path": "Font/font_russian.pak",
-      "plain_size": 682304,
-      "sha256": "eb5b0a3551959ab2a665b432c46f7f2477d463ebf3c01df77638f1adf372ef1c",
-      "source": "Font/font_russian.ttf"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 1273,
+      "packed_size": 682,
       "packet_type": 35,
       "path": "SrcVersion.pak",
-      "plain_size": 1253,
-      "sha256": "1e660a52c326979165c6197d43eb1d5c2b8c8a8b78f225083bb633dd962dff2a",
+      "plain_size": 672,
+      "sha256": "8f72a5a2daf14037172e5bba7b812ea7735e2bec43b97fa4c102f915d3b33086",
       "source": "SrcVersion.ini"
     },
     {
@@ -2683,1054 +2633,123 @@
       "source": "dist/InputHost.dex"
     },
     {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 247687,
-      "packet_type": 35,
-      "path": "img/Moon.pak",
-      "plain_size": 245267,
-      "sha256": "eed6ec586925f09423e79478d18fcf9f6c0b1acde841832ddc6488da03524766",
-      "source": "img/Moon.png"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 11010,
-      "packet_type": 35,
-      "path": "img/aim_off.pak",
-      "plain_size": 10900,
-      "sha256": "1597d25a3bedd512cf5d469f5b24a959f5f3980ba07e1c62c677705de031c106",
-      "source": "img/aim_off.png"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 14387,
-      "packet_type": 35,
-      "path": "img/aim_on.pak",
-      "plain_size": 14237,
-      "sha256": "06fc6c92510971ff23e2c3542713df5f0511916207e4196cac6656af07a639dd",
-      "source": "img/aim_on.png"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 94883,
-      "packet_type": 35,
-      "path": "img/demonbg.pak",
-      "plain_size": 93953,
-      "sha256": "0687e6e2893391e8bb16fa2f23fdb6e942bcbe44c67d8986e6152802db4c39c4",
-      "source": "img/demonbg.jpg"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 195480,
-      "packet_type": 35,
-      "path": "img/ghostmod.pak",
-      "plain_size": 193570,
-      "sha256": "827edafe1e0c1e6f982ce12d0af08e994d28013946d50d5b9d0ecc8242e1bd92",
-      "source": "img/ghostmod.png"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 7206,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-000.pak",
-      "plain_size": 7126,
-      "sha256": "74ca0a963e400aed09c09fb4b285985b0cd24bd38122972905a40bbf651d075a",
-      "source": "img/gif/ezgif-frame-000.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 7206,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-001.pak",
-      "plain_size": 7126,
-      "sha256": "b7b3941eb5eed0ab65ccded2f66a03d1c3cdef9d72956703a419f2acbacab7b1",
-      "source": "img/gif/ezgif-frame-001.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 7206,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-002.pak",
-      "plain_size": 7126,
-      "sha256": "406c1530788aff15f07d40f02b21d5fab67ab7d2405b6ee9f1b896041e0fb13a",
-      "source": "img/gif/ezgif-frame-002.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 9287,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-003.pak",
-      "plain_size": 9187,
-      "sha256": "786558f357c5fd90f5c45c26e85dfc6d85c8a0804ff009416df4485fa791c3ac",
-      "source": "img/gif/ezgif-frame-003.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 10085,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-004.pak",
-      "plain_size": 9985,
-      "sha256": "7c12a09628505c2e6ab845d273e46d116399c05a20e07bbc9b27d685f0f1da77",
-      "source": "img/gif/ezgif-frame-004.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 10085,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-005.pak",
-      "plain_size": 9985,
-      "sha256": "ae2d84f49229436ca642420127a0ee2edfb49cce7bc3259e1fdf605055f9dfdd",
-      "source": "img/gif/ezgif-frame-005.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 10450,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-006.pak",
-      "plain_size": 10340,
-      "sha256": "1a736372054714cba8fc8891bb6d4343b3db2b048dabec684f2c071911cca399",
-      "source": "img/gif/ezgif-frame-006.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 10568,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-007.pak",
-      "plain_size": 10458,
-      "sha256": "905fd90fa5f75fde26a901907f00ea9c96d2864fdcd2e1cce4f0d00288236393",
-      "source": "img/gif/ezgif-frame-007.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 10568,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-008.pak",
-      "plain_size": 10458,
-      "sha256": "8e7602b9d8def51cf7cf7599e811b19ebbbda760f5d74250cbfc82b72928ea63",
-      "source": "img/gif/ezgif-frame-008.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 12317,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-009.pak",
-      "plain_size": 12187,
-      "sha256": "b000a3cb1618d842feaa57961725e6c18913add03f478b5437f0036b576ec9e4",
-      "source": "img/gif/ezgif-frame-009.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 13303,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-010.pak",
-      "plain_size": 13173,
-      "sha256": "bd36ca69929620ca68891e7964277405a2253a73320f0ed23465607eb6480043",
-      "source": "img/gif/ezgif-frame-010.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 13303,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-011.pak",
-      "plain_size": 13173,
-      "sha256": "3ac6079e7d208aa854f7582f97e990367acdc4e31b619f1a5c3ac5b1013b946d",
-      "source": "img/gif/ezgif-frame-011.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 13869,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-012.pak",
-      "plain_size": 13729,
-      "sha256": "05148f1abff0c5af7668694de6ab60fdf9fff603f08897cb3eff398ea5106a82",
-      "source": "img/gif/ezgif-frame-012.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 14243,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-013.pak",
-      "plain_size": 14103,
-      "sha256": "da52a68cee6c991dd326635488d9fdbf80e2eb277f7116e21dacfac92ddd40c7",
-      "source": "img/gif/ezgif-frame-013.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 14243,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-014.pak",
-      "plain_size": 14103,
-      "sha256": "51e7263ec58a876ad29faeefae2b77408774a6e5fb31004502d79013d73e8340",
-      "source": "img/gif/ezgif-frame-014.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 15955,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-015.pak",
-      "plain_size": 15795,
-      "sha256": "c159dbfc31be334738325ae9ca5be6aaa633c9c989bc46e54a25f6d08e64e321",
-      "source": "img/gif/ezgif-frame-015.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 16904,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-016.pak",
-      "plain_size": 16734,
-      "sha256": "299afa373b495e1c1a26824f6cb4bdc2227aa50003523bea010853495be61952",
-      "source": "img/gif/ezgif-frame-016.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 16904,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-017.pak",
-      "plain_size": 16734,
-      "sha256": "c71512f7dad34abed94773f41496021ab9c350cf6a3db85fdd65dec7c8fc7ad8",
-      "source": "img/gif/ezgif-frame-017.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 17534,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-018.pak",
-      "plain_size": 17354,
-      "sha256": "cb7aa0d5a1cded347534b99d9399f3b4e0f30d00cae88d1d141e74cb0cb2fab2",
-      "source": "img/gif/ezgif-frame-018.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 18399,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-019.pak",
-      "plain_size": 18219,
-      "sha256": "5cf19f519a4fb17792719a33d4b24d8176717e6130e3b366669b7732c3fea0e4",
-      "source": "img/gif/ezgif-frame-019.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 18399,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-020.pak",
-      "plain_size": 18219,
-      "sha256": "558787708cde991da04e8c47998e6a5a8b22b459f231038732394caa47384094",
-      "source": "img/gif/ezgif-frame-020.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 19831,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-021.pak",
-      "plain_size": 19631,
-      "sha256": "e8def44538b12b2337bf750b082c5608f859d746df39e1d2fdbe559b7966bef2",
-      "source": "img/gif/ezgif-frame-021.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 21128,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-022.pak",
-      "plain_size": 20918,
-      "sha256": "cd38dd44a57b53c781c674f044f141c649ef929495526395a8c6f4fc3e1c8bb3",
-      "source": "img/gif/ezgif-frame-022.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 21128,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-023.pak",
-      "plain_size": 20918,
-      "sha256": "5f648ba3e6440a0dccbda2da6bfdf46da8dbbb0c684d3a5ee3efb0a66dbcefca",
-      "source": "img/gif/ezgif-frame-023.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 21752,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-024.pak",
-      "plain_size": 21532,
-      "sha256": "fa7cd054d4e8c0214ad9ad077f147c810566ff3af606bc05c588c43aae1615ce",
-      "source": "img/gif/ezgif-frame-024.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 21752,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-025.pak",
-      "plain_size": 21532,
-      "sha256": "21bfc690a793c6f9c569938c195e5e3e8a9c6a073a189c99dd917e1a30f64fa2",
-      "source": "img/gif/ezgif-frame-025.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 22518,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-026.pak",
-      "plain_size": 22298,
-      "sha256": "eeef38c79a5bc684a7c8239b1dce6b745c19710637d0d0a51421244080004eac",
-      "source": "img/gif/ezgif-frame-026.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 23911,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-027.pak",
-      "plain_size": 23671,
-      "sha256": "b8f13e55d5ed582079fa70fd86086b31007756e440052fc3d39bfe78f0a991ba",
-      "source": "img/gif/ezgif-frame-027.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 23911,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-028.pak",
-      "plain_size": 23671,
-      "sha256": "2c4b288df4024a4377b84692b2d3b9d115c9f3ba64024fe2fe1f5e3f59e16118",
-      "source": "img/gif/ezgif-frame-028.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 24727,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-029.pak",
-      "plain_size": 24477,
-      "sha256": "b6a928f95dfdbdf4ab0edc1422b9867f428f87d7b17803a364ec5ae6d3a4dc01",
-      "source": "img/gif/ezgif-frame-029.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 25408,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-030.pak",
-      "plain_size": 25158,
-      "sha256": "f9be8355b7a97605c6ed0d8494641894382ac9d0c54631bcd02495d24afe89c7",
-      "source": "img/gif/ezgif-frame-030.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 25408,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-031.pak",
-      "plain_size": 25158,
-      "sha256": "1048a2de21c06c4e8afe967a4f6c7ac9ec61d932b5958dbe2e0a07c2842f952f",
-      "source": "img/gif/ezgif-frame-031.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 26500,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-032.pak",
-      "plain_size": 26240,
-      "sha256": "15350c1218b922841ed1808aa81fa1107b99f50f74007a7b75388bc93ca2fb58",
-      "source": "img/gif/ezgif-frame-032.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 27433,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-033.pak",
-      "plain_size": 27163,
-      "sha256": "b10f83b0dbdb413816d69b620fb1bbcd97dedeb2a68771eed0bf2405480511e4",
-      "source": "img/gif/ezgif-frame-033.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 27433,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-034.pak",
-      "plain_size": 27163,
-      "sha256": "a476f98d92b442454fdb040a3cb0f619053342d4f173b957eb8d86c9ca29e88a",
-      "source": "img/gif/ezgif-frame-034.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 28212,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-035.pak",
-      "plain_size": 27932,
-      "sha256": "3c9087b571010b557f0757a7bf1d05538beafecc5e5b1fe78e13f453b644e178",
-      "source": "img/gif/ezgif-frame-035.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 28664,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-036.pak",
-      "plain_size": 28384,
-      "sha256": "b7631ecfddd206db5db4f70f110f163cbd9ced49dcc9b827bda12e682ba84bad",
-      "source": "img/gif/ezgif-frame-036.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 28664,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-037.pak",
-      "plain_size": 28384,
-      "sha256": "930d397ebbeb778adee51230fe99e6427e188cf59039ac98e24e1e309e307025",
-      "source": "img/gif/ezgif-frame-037.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 29978,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-038.pak",
-      "plain_size": 29678,
-      "sha256": "d3c1ab31bd4b3219efb8fd7332547b2a0acb0389ba2683f8d92f3f07a7d01848",
-      "source": "img/gif/ezgif-frame-038.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 30868,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-039.pak",
-      "plain_size": 30558,
-      "sha256": "107db1fc84e04c12a01e5fed25de23a643759f3eda4f35386cd5dc62983289c7",
-      "source": "img/gif/ezgif-frame-039.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 30868,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-040.pak",
-      "plain_size": 30558,
-      "sha256": "3e7f1dce170f5c29bd89d4c7281ed9c690758fc97e24275b4587b6f9be759183",
-      "source": "img/gif/ezgif-frame-040.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 31847,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-041.pak",
-      "plain_size": 31527,
-      "sha256": "2e518d49ffd8f935d69a9ef26dc4167f44ab929ce4e79f1d8c5b000afa8edd54",
-      "source": "img/gif/ezgif-frame-041.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 32822,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-042.pak",
-      "plain_size": 32492,
-      "sha256": "aafae7b87becdd55a287ffb63c5c8f829561b0559ab137634e481f757591750a",
-      "source": "img/gif/ezgif-frame-042.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 32822,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-043.pak",
-      "plain_size": 32492,
-      "sha256": "c9e82f4d3c6a69473fe83d183ee0704cdba70774b31171e2d044413881c4efa2",
-      "source": "img/gif/ezgif-frame-043.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 32369,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-044.pak",
-      "plain_size": 32049,
-      "sha256": "0c1318a9ef171f81ee0ce521dbec7b0bcb10f783427f72fdbd40a5d01004d9fd",
-      "source": "img/gif/ezgif-frame-044.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 33372,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-045.pak",
-      "plain_size": 33042,
-      "sha256": "753b89dcea1d1b27405804e1e25f5b1eecbee377b17c6446dd57fb3c88ea7e32",
-      "source": "img/gif/ezgif-frame-045.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 33372,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-046.pak",
-      "plain_size": 33042,
-      "sha256": "980722edf6b149aae7f7eed4c7a087d61bf981036172d86218466887ba976a70",
-      "source": "img/gif/ezgif-frame-046.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 33749,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-047.pak",
-      "plain_size": 33419,
-      "sha256": "f0e4bb3bd344a7aa688929db3f0adb4ed94cc0550f8db2baf0b6001e6c241c51",
-      "source": "img/gif/ezgif-frame-047.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 33749,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-048.pak",
-      "plain_size": 33419,
-      "sha256": "037c937860de55fb875b998ff0c90d48e89ac113d7f63afa073927cda9b079a5",
-      "source": "img/gif/ezgif-frame-048.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 34933,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-049.pak",
-      "plain_size": 34583,
-      "sha256": "9202c05b29da46073c33a42cbad5a295f3175299ac97f8942624d26e3bf977ca",
-      "source": "img/gif/ezgif-frame-049.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 35688,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-050.pak",
-      "plain_size": 35338,
-      "sha256": "29ee97628e738a7ca252a5d59dcbc5f85255d1ae2b437e85ea0b0cbeed850edf",
-      "source": "img/gif/ezgif-frame-050.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 35688,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-051.pak",
-      "plain_size": 35338,
-      "sha256": "2ef22aeeb946055056d3fc5f059aa78ccf97b3eb9120f9b59915ac3214fe8db5",
-      "source": "img/gif/ezgif-frame-051.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 36366,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-052.pak",
-      "plain_size": 36006,
-      "sha256": "7c736e54008f3d41600ba630dab7c41f087a27034949d9240910efde4ee08818",
-      "source": "img/gif/ezgif-frame-052.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37426,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-053.pak",
-      "plain_size": 37056,
-      "sha256": "59eeffb422f7c7f6f4d0a9fd5bfa1b733b9d1759ad5b3222d441c2dea9b843e4",
-      "source": "img/gif/ezgif-frame-053.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37426,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-054.pak",
-      "plain_size": 37056,
-      "sha256": "b33376c15d6e3f7bd9c116c4dab11525f6ad1494f6bcd4529e48ded29573c258",
-      "source": "img/gif/ezgif-frame-054.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37546,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-055.pak",
-      "plain_size": 37176,
-      "sha256": "dfde436fd1c97d743c667b0e7e6bd3e3d56302f7ab4248389e87725220394ae8",
-      "source": "img/gif/ezgif-frame-055.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37520,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-056.pak",
-      "plain_size": 37150,
-      "sha256": "95937ce754bdf7fd2bf961471ef25e916fd35dd9f8d3a77de833e9bbdbea3057",
-      "source": "img/gif/ezgif-frame-056.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37520,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-057.pak",
-      "plain_size": 37150,
-      "sha256": "7216126948a6ff29bc79b0d0bbaa30553b9991aac2a48576a6b40a1b5dea3809",
-      "source": "img/gif/ezgif-frame-057.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37512,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-058.pak",
-      "plain_size": 37142,
-      "sha256": "c12ac524c9b21f53a25e04f90da50b47ddf0e3e8932c9b65cfa1e3ea6e63230d",
-      "source": "img/gif/ezgif-frame-058.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37512,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-059.pak",
-      "plain_size": 37142,
-      "sha256": "d9ef75d0cf950162065fbcac56f34bd6423cc480a60b916f9e6a9a0d0cbd4c18",
-      "source": "img/gif/ezgif-frame-059.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37512,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-060.pak",
-      "plain_size": 37142,
-      "sha256": "6e874d00bc2d0d3dee9698da21a13dfb1baae3639bbd986627acbf6359cc6a0b",
-      "source": "img/gif/ezgif-frame-060.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37480,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-061.pak",
-      "plain_size": 37110,
-      "sha256": "fa946970e389ac94ba26f18d89aeb1dc0791a9533c064c16d11d88b22653676d",
-      "source": "img/gif/ezgif-frame-061.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37480,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-062.pak",
-      "plain_size": 37110,
-      "sha256": "d2929b3a2f060f7663656ee46cd99521c1db2d02469b4b3f3ada8632e0578c14",
-      "source": "img/gif/ezgif-frame-062.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37480,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-063.pak",
-      "plain_size": 37110,
-      "sha256": "aa4c4c8239c399d31ed5866fa9314fbcb22e1d111f639f465777a3672a24cdca",
-      "source": "img/gif/ezgif-frame-063.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37480,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-064.pak",
-      "plain_size": 37110,
-      "sha256": "d6d8407935d71107a14992ea4b0452e9965fdd2924db8d5d5970767a7d578b45",
-      "source": "img/gif/ezgif-frame-064.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37518,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-065.pak",
-      "plain_size": 37148,
-      "sha256": "5554c1f6ec06a4d6d5ac34a44597ccf8c4c1abfeeb2964e17203267ba37bb404",
-      "source": "img/gif/ezgif-frame-065.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37518,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-066.pak",
-      "plain_size": 37148,
-      "sha256": "2b7a64b8b8dbd35b38cf6827c0ebd16fb8d30d0506344e7d6ea9936919c079cc",
-      "source": "img/gif/ezgif-frame-066.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37488,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-067.pak",
-      "plain_size": 37118,
-      "sha256": "2a4e291dddd0c2f05b60a3a7e84ef555252c7ace4375ae729ed3381776d5ede0",
-      "source": "img/gif/ezgif-frame-067.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37488,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-068.pak",
-      "plain_size": 37118,
-      "sha256": "f237d21ad929081683d2421395afc700da82065395bae4210cfb96c88114d7ea",
-      "source": "img/gif/ezgif-frame-068.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37488,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-069.pak",
-      "plain_size": 37118,
-      "sha256": "ce46a9354f799516fac696d612e97764f24e59d1d4dcf42b4ed1b694ff85100d",
-      "source": "img/gif/ezgif-frame-069.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37518,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-070.pak",
-      "plain_size": 37148,
-      "sha256": "c6324fd6038f5a14214c99c68696eb2a683b2414c28841a4a1b788de5336c4a4",
-      "source": "img/gif/ezgif-frame-070.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 37518,
-      "packet_type": 35,
-      "path": "img/gif/ezgif-frame-071.pak",
-      "plain_size": 37148,
-      "sha256": "7d1bbc8c4d5186f5947b7693ad2dedd65057fcf1d199dd9d836b15bdf8728565",
-      "source": "img/gif/ezgif-frame-071.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 297366,
-      "packet_type": 35,
-      "path": "img/gif/frame_00_delay-0.04s.pak",
-      "plain_size": 294456,
-      "sha256": "51aff6749c4da04abaa2fc5f4dd71b133ee37bae367e55a5f0947c8ca18507d4",
-      "source": "img/gif/frame_00_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 351117,
-      "packet_type": 35,
-      "path": "img/gif/frame_01_delay-0.04s.pak",
-      "plain_size": 347687,
-      "sha256": "a1564f61f79514b22d6f156e615047d094a6caf3d70f9ad10901188353c37f84",
-      "source": "img/gif/frame_01_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 362455,
-      "packet_type": 35,
-      "path": "img/gif/frame_02_delay-0.04s.pak",
-      "plain_size": 358915,
-      "sha256": "3eecddd77e2697ea75fa37b8e6b54766419dc32dfa112a1340f080716d8b5d5c",
-      "source": "img/gif/frame_02_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 371706,
-      "packet_type": 35,
-      "path": "img/gif/frame_03_delay-0.04s.pak",
-      "plain_size": 368076,
-      "sha256": "1fa6d231e03e498b4d461ffc760f2f78f3dcb14923f1c37f30875129c89ba894",
-      "source": "img/gif/frame_03_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 378197,
-      "packet_type": 35,
-      "path": "img/gif/frame_04_delay-0.04s.pak",
-      "plain_size": 374497,
-      "sha256": "da07725ca31f4b6b12829d5cb79aa892f4ab559071ad2b2d88ac63d58338933e",
-      "source": "img/gif/frame_04_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 371834,
-      "packet_type": 35,
-      "path": "img/gif/frame_05_delay-0.04s.pak",
-      "plain_size": 368194,
-      "sha256": "472e3e10487989a26b0a57fe4ffab87cfa58022328e80fd51ee0f479a210cf36",
-      "source": "img/gif/frame_05_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 336226,
-      "packet_type": 35,
-      "path": "img/gif/frame_06_delay-0.04s.pak",
-      "plain_size": 332936,
-      "sha256": "b96c7135d5d0d5970ca248adc4558d49a912e3bf30cb3857a042580003ef2f2a",
-      "source": "img/gif/frame_06_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 348718,
-      "packet_type": 35,
-      "path": "img/gif/frame_07_delay-0.04s.pak",
-      "plain_size": 345308,
-      "sha256": "46eb66412e43a34402c2415ac03ab59b442b5d95ec166542605e3997421997ce",
-      "source": "img/gif/frame_07_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 331695,
-      "packet_type": 35,
-      "path": "img/gif/frame_08_delay-0.04s.pak",
-      "plain_size": 328455,
-      "sha256": "2cdfdaa6e3628313222741843fee14eed0e48b2fc07a21ae5038debfbbf14bc5",
-      "source": "img/gif/frame_08_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 280844,
-      "packet_type": 35,
-      "path": "img/gif/frame_09_delay-0.04s.pak",
-      "plain_size": 278094,
-      "sha256": "bccd93d1fb58f748aa8308304e6bc4da1729a5b903e583b911956dbb55042a4b",
-      "source": "img/gif/frame_09_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 246147,
-      "packet_type": 35,
-      "path": "img/gif/frame_10_delay-0.04s.pak",
-      "plain_size": 243737,
-      "sha256": "f8624c7656c31df60dbcb1424b03acc623d33f472a401cf5316baf1062f5b8ed",
-      "source": "img/gif/frame_10_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 217896,
-      "packet_type": 35,
-      "path": "img/gif/frame_11_delay-0.04s.pak",
-      "plain_size": 215766,
-      "sha256": "2b05bb2a73271e6af2c9e97ff261d188a73e9e4351c80703dfdfe07cf2e5c9b0",
-      "source": "img/gif/frame_11_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 311148,
-      "packet_type": 35,
-      "path": "img/gif/frame_12_delay-0.04s.pak",
-      "plain_size": 308108,
-      "sha256": "7d96787aa499cac8712d29b84af6085336b1d46cccb255046e9d1597427410c1",
-      "source": "img/gif/frame_12_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 344518,
-      "packet_type": 35,
-      "path": "img/gif/frame_13_delay-0.04s.pak",
-      "plain_size": 341148,
-      "sha256": "6bb3a7cef39b6f29a3990f5edc0f7553843f451c2e359a69a2e73b31de339fac",
-      "source": "img/gif/frame_13_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 345787,
-      "packet_type": 35,
-      "path": "img/gif/frame_14_delay-0.04s.pak",
-      "plain_size": 342407,
-      "sha256": "d82b6c94cf802c4f678f7f8dd00e1b6f1382242ca16110c71226ebdd47b3756f",
-      "source": "img/gif/frame_14_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 361443,
-      "packet_type": 35,
-      "path": "img/gif/frame_15_delay-0.04s.pak",
-      "plain_size": 357913,
-      "sha256": "bb4565b24a16bd952322c54dff580499b72a266b59f4a8b2caf00fa9b85f8d6c",
-      "source": "img/gif/frame_15_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 356983,
-      "packet_type": 35,
-      "path": "img/gif/frame_16_delay-0.04s.pak",
-      "plain_size": 353493,
-      "sha256": "4a4580b0d2a88e0a0e74e45d3cf0ea36b3330354d8d855cf69c3f61ed61cc19d",
-      "source": "img/gif/frame_16_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 354383,
-      "packet_type": 35,
-      "path": "img/gif/frame_17_delay-0.04s.pak",
-      "plain_size": 350913,
-      "sha256": "fe9e3f7523547804e1bc7337e7ae747e0895a22ac187cdbff77f796ce1bd41e6",
-      "source": "img/gif/frame_17_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 347802,
-      "packet_type": 35,
-      "path": "img/gif/frame_18_delay-0.04s.pak",
-      "plain_size": 344402,
-      "sha256": "8fb435c33a88b631d0b0f3b1eddc42dfdea68cbfd8cdf3bf9b27d79b2b5d9942",
-      "source": "img/gif/frame_18_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 340661,
-      "packet_type": 35,
-      "path": "img/gif/frame_19_delay-0.04s.pak",
-      "plain_size": 337331,
-      "sha256": "c68156668cd990304c5a6bbf961da58dfe0eda9863da98938170d78a373c59e7",
-      "source": "img/gif/frame_19_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 287766,
-      "packet_type": 35,
-      "path": "img/gif/frame_20_delay-0.04s.pak",
-      "plain_size": 284946,
-      "sha256": "f16c6fda4d826582545b233eee935b12f0517d0ef4da5b3b21a6c4a1e13372d8",
-      "source": "img/gif/frame_20_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 268153,
-      "packet_type": 35,
-      "path": "img/gif/frame_21_delay-0.04s.pak",
-      "plain_size": 265533,
-      "sha256": "a1a9e77c1aba7c7b7b01c3e614c0b690c2b436bb99eb5f96220be0885e9c9954",
-      "source": "img/gif/frame_21_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 237094,
-      "packet_type": 35,
-      "path": "img/gif/frame_22_delay-0.04s.pak",
-      "plain_size": 234774,
-      "sha256": "1c7ccdf96ec8531712bb52bc980d3256f5009c4388ed35801c96fa29dfcd9295",
-      "source": "img/gif/frame_22_delay-0.04s.gif"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 303167,
-      "packet_type": 35,
-      "path": "img/hell.pak",
-      "plain_size": 300197,
-      "sha256": "dd44dd84e79efd994e076ffcea4d5a58f421eb75977d7da044dfc31b975989d3",
-      "source": "img/hell.png"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 958462,
-      "packet_type": 35,
-      "path": "img/jarvis.pak",
-      "plain_size": 949102,
-      "sha256": "06d49ef3d4b3ad9ac9a2710f443c2a588d0c8e34d7c6667dd3169817c54445b9",
-      "source": "img/jarvis.png"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 32131,
-      "packet_type": 35,
-      "path": "img/moonbg.pak",
-      "plain_size": 31811,
-      "sha256": "d1892b5fd8bfc76daa60783458bfc510f0f17d5a04070cf71118010f387606f1",
-      "source": "img/moonbg.jpg"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 8592,
-      "packet_type": 35,
-      "path": "img/n.pak",
-      "plain_size": 8502,
-      "sha256": "49426ee5c0153a0adb6dd06108b5f745179e60a8d7eba25b15f0979913b57ed2",
-      "source": "img/n.png"
-    },
-    {
-      "max_frame": 1024,
-      "mode": "packet_envelope",
-      "packed_size": 325387,
-      "packet_type": 35,
-      "path": "img/vampy.pak",
-      "plain_size": 322207,
-      "sha256": "e76e7522248b45616c7743c0aac1090798db2cf26bedf2e4c78574b5b8eef60f",
-      "source": "img/vampy.png"
+      "mode": "hamburger_packet_envelope",
+      "path": "hamburger/resources.hbg",
+      "record_count": 110,
+      "sha256": "30a54e8f9650e2d48debc4782040b84896174f20a7db630f7aae683427bf39be",
+      "size": 15365789,
+      "source": [
+        "Font/font_awesome.ttf",
+        "Font/font_chinese.ttf",
+        "Font/font_english.ttf",
+        "Font/font_japanese.ttf",
+        "Font/font_russian.ttf",
+        "img/Moon.png",
+        "img/aim_off.png",
+        "img/aim_on.png",
+        "img/demonbg.jpg",
+        "img/ghostmod.png",
+        "img/gif/ezgif-frame-000.gif",
+        "img/gif/ezgif-frame-001.gif",
+        "img/gif/ezgif-frame-002.gif",
+        "img/gif/ezgif-frame-003.gif",
+        "img/gif/ezgif-frame-004.gif",
+        "img/gif/ezgif-frame-005.gif",
+        "img/gif/ezgif-frame-006.gif",
+        "img/gif/ezgif-frame-007.gif",
+        "img/gif/ezgif-frame-008.gif",
+        "img/gif/ezgif-frame-009.gif",
+        "img/gif/ezgif-frame-010.gif",
+        "img/gif/ezgif-frame-011.gif",
+        "img/gif/ezgif-frame-012.gif",
+        "img/gif/ezgif-frame-013.gif",
+        "img/gif/ezgif-frame-014.gif",
+        "img/gif/ezgif-frame-015.gif",
+        "img/gif/ezgif-frame-016.gif",
+        "img/gif/ezgif-frame-017.gif",
+        "img/gif/ezgif-frame-018.gif",
+        "img/gif/ezgif-frame-019.gif",
+        "img/gif/ezgif-frame-020.gif",
+        "img/gif/ezgif-frame-021.gif",
+        "img/gif/ezgif-frame-022.gif",
+        "img/gif/ezgif-frame-023.gif",
+        "img/gif/ezgif-frame-024.gif",
+        "img/gif/ezgif-frame-025.gif",
+        "img/gif/ezgif-frame-026.gif",
+        "img/gif/ezgif-frame-027.gif",
+        "img/gif/ezgif-frame-028.gif",
+        "img/gif/ezgif-frame-029.gif",
+        "img/gif/ezgif-frame-030.gif",
+        "img/gif/ezgif-frame-031.gif",
+        "img/gif/ezgif-frame-032.gif",
+        "img/gif/ezgif-frame-033.gif",
+        "img/gif/ezgif-frame-034.gif",
+        "img/gif/ezgif-frame-035.gif",
+        "img/gif/ezgif-frame-036.gif",
+        "img/gif/ezgif-frame-037.gif",
+        "img/gif/ezgif-frame-038.gif",
+        "img/gif/ezgif-frame-039.gif",
+        "img/gif/ezgif-frame-040.gif",
+        "img/gif/ezgif-frame-041.gif",
+        "img/gif/ezgif-frame-042.gif",
+        "img/gif/ezgif-frame-043.gif",
+        "img/gif/ezgif-frame-044.gif",
+        "img/gif/ezgif-frame-045.gif",
+        "img/gif/ezgif-frame-046.gif",
+        "img/gif/ezgif-frame-047.gif",
+        "img/gif/ezgif-frame-048.gif",
+        "img/gif/ezgif-frame-049.gif",
+        "img/gif/ezgif-frame-050.gif",
+        "img/gif/ezgif-frame-051.gif",
+        "img/gif/ezgif-frame-052.gif",
+        "img/gif/ezgif-frame-053.gif",
+        "img/gif/ezgif-frame-054.gif",
+        "img/gif/ezgif-frame-055.gif",
+        "img/gif/ezgif-frame-056.gif",
+        "img/gif/ezgif-frame-057.gif",
+        "img/gif/ezgif-frame-058.gif",
+        "img/gif/ezgif-frame-059.gif",
+        "img/gif/ezgif-frame-060.gif",
+        "img/gif/ezgif-frame-061.gif",
+        "img/gif/ezgif-frame-062.gif",
+        "img/gif/ezgif-frame-063.gif",
+        "img/gif/ezgif-frame-064.gif",
+        "img/gif/ezgif-frame-065.gif",
+        "img/gif/ezgif-frame-066.gif",
+        "img/gif/ezgif-frame-067.gif",
+        "img/gif/ezgif-frame-068.gif",
+        "img/gif/ezgif-frame-069.gif",
+        "img/gif/ezgif-frame-070.gif",
+        "img/gif/ezgif-frame-071.gif",
+        "img/gif/frame_00_delay-0.04s.gif",
+        "img/gif/frame_01_delay-0.04s.gif",
+        "img/gif/frame_02_delay-0.04s.gif",
+        "img/gif/frame_03_delay-0.04s.gif",
+        "img/gif/frame_04_delay-0.04s.gif",
+        "img/gif/frame_05_delay-0.04s.gif",
+        "img/gif/frame_06_delay-0.04s.gif",
+        "img/gif/frame_07_delay-0.04s.gif",
+        "img/gif/frame_08_delay-0.04s.gif",
+        "img/gif/frame_09_delay-0.04s.gif",
+        "img/gif/frame_10_delay-0.04s.gif",
+        "img/gif/frame_11_delay-0.04s.gif",
+        "img/gif/frame_12_delay-0.04s.gif",
+        "img/gif/frame_13_delay-0.04s.gif",
+        "img/gif/frame_14_delay-0.04s.gif",
+        "img/gif/frame_15_delay-0.04s.gif",
+        "img/gif/frame_16_delay-0.04s.gif",
+        "img/gif/frame_17_delay-0.04s.gif",
+        "img/gif/frame_18_delay-0.04s.gif",
+        "img/gif/frame_19_delay-0.04s.gif",
+        "img/gif/frame_20_delay-0.04s.gif",
+        "img/gif/frame_21_delay-0.04s.gif",
+        "img/gif/frame_22_delay-0.04s.gif",
+        "img/hell.png",
+        "img/jarvis.png",
+        "img/moonbg.jpg",
+        "img/n.png",
+        "img/vampy.png"
+      ]
     },
     {
       "mode": "raw",
@@ -3930,10 +2949,10 @@
   "required_outputs": [
     "SrcVersion.pak",
     "auth/subscription.pak",
-    "dist/InputHost.pak"
+    "dist/InputHost.pak",
+    "hamburger/resources.hbg"
   ],
   "required_sources": [
-    "lua_src/",
     "SrcVersion.ini",
     "auth/subscription.main.json",
     "dist/InputHost.dex"
@@ -3982,15 +3001,15 @@
       "src": "assest/"
     },
     {
-      "dst": "Font/",
-      "mode": "pak",
-      "req_out": false,
+      "dst": "hamburger/resources.hbg:Font/",
+      "mode": "hbg",
+      "req_out": true,
       "req_src": false,
       "src": "Font/"
     },
     {
-      "dst": "img/",
-      "mode": "pak",
+      "dst": "hamburger/resources.hbg:img/",
+      "mode": "hbg",
       "req_out": false,
       "req_src": false,
       "src": "img/"
@@ -4001,90 +3020,6 @@
       "req_out": false,
       "req_src": false,
       "src": "lib/"
-    },
-    {
-      "dst": "",
-      "mode": "skip",
-      "req_out": false,
-      "req_src": false,
-      "src": "lib/4.4/"
-    },
-    {
-      "dst": "SrcVersion.ini",
-      "mode": "pak",
-      "req_out": false,
-      "req_src": false,
-      "src": "SrcVersion.ini"
-    },
-    {
-      "dst": "auth/",
-      "mode": "pak",
-      "req_out": false,
-      "req_src": false,
-      "src": "auth/"
-    },
-    {
-      "dst": "dist/",
-      "mode": "pak",
-      "req_out": false,
-      "req_src": false,
-      "src": "dist/"
-    },
-    {
-      "dst": "lua/",
-      "mode": "pak",
-      "req_out": false,
-      "req_src": false,
-      "src": "lua_src/"
-    },
-    {
-      "dst": "client/",
-      "mode": "pak",
-      "req_out": false,
-      "req_src": false,
-      "src": "client/"
-    },
-    {
-      "dst": "assest/",
-      "mode": "pak",
-      "req_out": false,
-      "req_src": false,
-      "src": "assest/"
-    },
-    {
-      "dst": "Font/",
-      "mode": "pak",
-      "req_out": false,
-      "req_src": false,
-      "src": "Font/"
-    },
-    {
-      "dst": "img/",
-      "mode": "pak",
-      "req_out": false,
-      "req_src": false,
-      "src": "img/"
-    },
-    {
-      "dst": "lib/",
-      "mode": "raw",
-      "req_out": false,
-      "req_src": false,
-      "src": "lib/"
-    },
-    {
-      "dst": "auth/subscription.json",
-      "mode": "pak",
-      "req_out": false,
-      "req_src": false,
-      "src": "auth/subscription.main.json"
-    },
-    {
-      "dst": "lua/",
-      "mode": "pak",
-      "req_out": false,
-      "req_src": false,
-      "src": "lua_src/"
     },
     {
       "dst": "",
@@ -4095,5 +3030,5 @@
     }
   ],
   "schema": 2,
-  "version": "e7d342c1908613eb3390f8e1fb77d938905012e3"
+  "version": "58b928a297d4abea7f3d6421a263236c0f1cec73"
 }
