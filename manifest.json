@@ -2595,11 +2595,11 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 6101,
+      "packed_size": 6091,
       "packet_type": 35,
       "path": "auth/subscription.pak",
-      "plain_size": 6041,
-      "sha256": "fbe828ebf38cebe8c174f47660f833cbb8c385cfd20da6e98e2ac2361562bee7",
+      "plain_size": 6031,
+      "sha256": "927c9e3879f2e198027e6a5090e1bb7d435a3c4b34e2cbe7a2214fca9cdff66a",
       "source": "auth/subscription.json"
     },
     {
@@ -3023,5 +3023,5 @@
     }
   ],
   "schema": 3,
-  "version": "be236e153ad30985ec1461f2ed4d1464fde6faa7"
+  "version": "64aadd9b478117158155f0e33fc2c746d0f75ae7"
 }
