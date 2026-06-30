@@ -1,14 +1,4 @@
 {
-  "asset_prefixes": [
-    "auth/",
-    "dist/",
-    "lua_src/",
-    "client/",
-    "assest/",
-    "Font/",
-    "img/",
-    "lib/"
-  ],
   "channel": "live",
   "file_count": 393,
   "files": [
@@ -65,11 +55,11 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 250,
+      "packed_size": 1273,
       "packet_type": 35,
       "path": "SrcVersion.pak",
-      "plain_size": 240,
-      "sha256": "12168191248196aee4b1a2b5ec7cf30b145444bb089fd09984edb227e89b5a5d",
+      "plain_size": 1253,
+      "sha256": "1e660a52c326979165c6197d43eb1d5c2b8c8a8b78f225083bb633dd962dff2a",
       "source": "SrcVersion.ini"
     },
     {
@@ -3937,17 +3927,42 @@
     "pair_size": 4,
     "sig_xor": 46774
   },
-  "raw_prefixes": [
-    "lib/"
-  ],
-  "required_files": [
-    "SrcVersion.ini",
-    "auth/subscription.main.json",
-    "dist/InputHost.dex"
-  ],
-  "root_files": [
-    "SrcVersion.ini"
-  ],
+  "rules": {
+    "include": [
+      "SrcVersion.ini",
+      "auth/",
+      "dist/",
+      "lua_src/",
+      "client/",
+      "assest/",
+      "Font/",
+      "img/",
+      "lib/"
+    ],
+    "map": [
+      "auth/subscription.main.json=>auth/subscription.json",
+      "lua_src/=>lua/",
+      "auth/subscription.main.json=>auth/subscription.json",
+      "lua_src/=>lua/"
+    ],
+    "raw": [
+      "lib/"
+    ],
+    "required_outputs": [
+      "SrcVersion.pak",
+      "auth/subscription.pak",
+      "dist/InputHost.pak"
+    ],
+    "required_sources": [
+      "SrcVersion.ini",
+      "auth/subscription.main.json",
+      "dist/InputHost.dex",
+      "lua_src/"
+    ],
+    "skip": [
+      "lib/4.4/"
+    ]
+  },
   "schema": 1,
-  "version": "0a3effa5d10d7c9eaf0af123d0a71cab61c48ccc"
+  "version": "ab0c14ab9356f34b494bd35e78cd656dfd07544a"
 }
