@@ -2659,7 +2659,7 @@
       "packet_type": 35,
       "path": "client/IllI.pak",
       "plain_size": 1412896,
-      "sha256": "f8777754882a95562d8064698f73cd0924537557a469189d33b5fd2fe3d91396",
+      "sha256": "64a80e4600b93fcc224c26b1d4e58d6b0108fdc38463070b0dc0408ce45d4524",
       "source": "client/IllI.exe"
     },
     {
@@ -3853,5 +3853,5 @@
     }
   ],
   "schema": 3,
-  "version": "cfdde3016e0865b502f155b0739a50f1536c64e7"
+  "version": "78ecc585e364c49a9adb820ad19185d9e9718a3c"
 }
