@@ -2655,11 +2655,11 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 1430450,
+      "packed_size": 1431484,
       "packet_type": 35,
       "path": "client/IllI.pak",
-      "plain_size": 1416480,
-      "sha256": "1dcf296d11f207fd1e35a1dc47e6404cf50a04726dc65f596ffd252be29824fb",
+      "plain_size": 1417504,
+      "sha256": "ac885bef3f78900b2014d719b0b326f6696afa86cf1adba37240d721856b7f18",
       "source": "client/IllI.exe"
     },
     {
@@ -4003,5 +4003,5 @@
     }
   ],
   "schema": 3,
-  "version": "66c361e0ceb3a3b58c3aba83c4381592a6f6538b"
+  "version": "b13bfe99c810b0442cb3287846c47e9aca306c95"
 }
