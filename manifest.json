@@ -2635,11 +2635,11 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 152085,
+      "packed_size": 181790,
       "packet_type": 35,
       "path": "assest/language.pak",
-      "plain_size": 150595,
-      "sha256": "ea0e26c089f88c2c1f4de3d84a4ffe47e6e5f5a57b1d04294c88cc8f784596b6",
+      "plain_size": 180010,
+      "sha256": "67c0c650c19a5ed241e593c57d84c9ff2539cefd4996dbe81cd64adb65a3a0e4",
       "source": "assest/language.json"
     },
     {
@@ -4003,5 +4003,5 @@
     }
   ],
   "schema": 3,
-  "version": "f6085601ece2e01550fbf174fe64df1775d56941"
+  "version": "9334705cd369ea4bffa561e60e67b0b3ebb1f94c"
 }
