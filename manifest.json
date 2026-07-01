@@ -55,11 +55,11 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 517,
+      "packed_size": 660,
       "packet_type": 35,
       "path": "SrcVersion.pak",
-      "plain_size": 507,
-      "sha256": "f8df7b6d95a16c63938191844b386e88137621f40a02d5f738e56d55e17ae0fa",
+      "plain_size": 650,
+      "sha256": "e65ae2b671f6c31452910cc01d2d73d8bc26736d10d2d920f2e127c8c02d50be",
       "source": "SrcVersion.ini"
     },
     {
@@ -4003,5 +4003,5 @@
     }
   ],
   "schema": 3,
-  "version": "93015f7892876dfabea8b980c355111030e54343"
+  "version": "dba6e061f65620feae4a7303bfe12113aa36f033"
 }
