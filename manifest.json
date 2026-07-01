@@ -2675,11 +2675,11 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 72150,
+      "packed_size": 81172,
       "packet_type": 35,
       "path": "dist/InputHost.pak",
-      "plain_size": 71440,
-      "sha256": "9974eaacadded953aed1bcf8437f7bed0391ce20a90001688e4389c9755c28b1",
+      "plain_size": 80372,
+      "sha256": "434ce45c7a75e2af8cc5ee95db3ce8b6ffb5704c8549ce1d6c76accff8c941f7",
       "source": "dist/InputHost.dex"
     },
     {
@@ -4003,5 +4003,5 @@
     }
   ],
   "schema": 3,
-  "version": "b13bfe99c810b0442cb3287846c47e9aca306c95"
+  "version": "3cedc73d8f1a87215da6c444b1331bc2066e7b6d"
 }
