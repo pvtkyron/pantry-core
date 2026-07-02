@@ -59,7 +59,7 @@
       "packet_type": 35,
       "path": "SrcVersion.pak",
       "plain_size": 664,
-      "sha256": "69d35b96cc4e754fd982238cac8b75f849d33da77cb13e469fff7152f5a7ab63",
+      "sha256": "aa159da8f12591051c28a3a605c562ef6591c8b46615f2f122b7aa843a345752",
       "source": "SrcVersion.ini"
     },
     {
@@ -2659,7 +2659,7 @@
       "packet_type": 35,
       "path": "client/IllI.pak",
       "plain_size": 1420064,
-      "sha256": "7740357fa2c7d107ed7582b963fb3d91eca4b9ba90391c70031253153f5e048d",
+      "sha256": "22e6f6cf07e1af8e8996317aa13ef961f6b19f15b3c65bc14154a1385cb48cb6",
       "source": "client/IllI.exe"
     },
     {
@@ -4004,5 +4004,5 @@
     }
   ],
   "schema": 3,
-  "version": "b629b708930eb733ba9bdcdfe268d0ac04a2c905"
+  "version": "73224633053d194013c04b290ca47908fa2d003a"
 }
