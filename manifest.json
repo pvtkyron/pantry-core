@@ -55,11 +55,11 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 660,
+      "packed_size": 674,
       "packet_type": 35,
       "path": "SrcVersion.pak",
-      "plain_size": 650,
-      "sha256": "b205dacce7caf6a647318799c562f4199a5c7511a668e4255fbbc73779df4a01",
+      "plain_size": 664,
+      "sha256": "7d76e84d129b1ffdea97777c0c030866e4596ec1137365d1f148e9fab6fd8872",
       "source": "SrcVersion.ini"
     },
     {
@@ -3800,11 +3800,11 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 34880,
+      "packed_size": 34915,
       "packet_type": 35,
       "path": "lua/hudLabel.pak",
-      "plain_size": 34530,
-      "sha256": "56db041d4ec86d9220398ec04fd5eed7cf736f9a63aec56a8509beefb6f5f7a1",
+      "plain_size": 34565,
+      "sha256": "7c7e2496e238164653be19ebccf36e7fad60417a2ecd7a04e63372c20acd84f8",
       "source": "lua_src/hudLabel.lua"
     },
     {
@@ -4003,5 +4003,5 @@
     }
   ],
   "schema": 3,
-  "version": "d4878048bc88839a3950b3a16eeb4d18e5b05f0d"
+  "version": "ac5bd7c6e390365af776a7bed17a296405b8b6f8"
 }
