@@ -3800,11 +3800,11 @@
     {
       "max_frame": 1024,
       "mode": "packet_envelope",
-      "packed_size": 34915,
+      "packed_size": 34850,
       "packet_type": 35,
       "path": "lua/hudLabel.pak",
-      "plain_size": 34565,
-      "sha256": "7c7e2496e238164653be19ebccf36e7fad60417a2ecd7a04e63372c20acd84f8",
+      "plain_size": 34500,
+      "sha256": "b49d22b3bb61333365bec27b45105a83203e212e4762542c1731cfd293ee2d3f",
       "source": "lua_src/hudLabel.lua"
     },
     {
@@ -4003,5 +4003,5 @@
     }
   ],
   "schema": 3,
-  "version": "f694f2cc24503a2ce31fdb37420e133440ec320b"
+  "version": "712f0a51a81507af9f751f8d92f82b1f70e39b02"
 }
