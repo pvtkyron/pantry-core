@@ -1,7 +1,7 @@
-source_sha=32796ebf9124f4ed21827785686ca9e7a8849a13
-run_id=31201965118
+source_sha=2caeb64ab4e3a644ce53ee43b2ad64246c0c8de1
+run_id=31202114867
 run_attempt=1
 event=push
 index_record=pantry-index.json
 bundle=drift.bin
-published_at=2026-08-07T17:22:44Z
+published_at=2026-08-07T17:24:46Z
