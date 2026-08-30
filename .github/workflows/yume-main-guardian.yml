@@ -3,7 +3,6 @@ name: ゆめちゃん 🌸 Main Guardian
 on:
   create:
   push:
-    branches-ignore: [main]
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
