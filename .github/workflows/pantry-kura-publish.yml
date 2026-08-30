@@ -1,0 +1,175 @@
+name: Pantry Kura Publish
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [pantry-kura-publish]
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pantry-kura-publish-main
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Prepare private Pantry into Kura
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      KYRON_ANDROID_PLATFORM: android-35
+      KYRON_ANDROID_BUILD_TOOLS: 35.0.0
+      KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets.KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM }}
+      KYRON_CONTENT_PRIVATE_PEM: ${{ secrets.KYRON_CONTENT_PRIVATE_PEM }}
+      KYRON_LAUNCH_CAPSULE_MASTER_HEX: ${{ secrets.KYRON_LAUNCH_CAPSULE_MASTER_HEX }}
+
+    steps:
+      - name: Checkout Pantry Core
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: core
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Checkout protected Pantry source
+        uses: actions/checkout@v6
+        with:
+          repository: pvtkyron/pantry
+          ref: main
+          token: ${{ secrets.PANTRY_SOURCE_RO }}
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Resolve source and skip an identical publication
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git -C source rev-parse HEAD)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          last="$(git -C core log -1 --format=%B -- kura 2>/dev/null || true)"
+          skip=false
+          if grep -Fqx "Pantry-Source: $sha" <<<"$last"; then skip=true; fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "[KURA][SOURCE] pantry=$sha skip=$skip"
+
+      - name: Enforce private-source ownership boundary
+        if: ${{ steps.source.outputs.skip != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e source/kura || { echo '::error::kura output must never be committed into private Pantry source'; exit 2; }
+          for path in auth client lib security src tools; do
+            test -e "source/$path" || { echo "::error::protected Pantry source root missing: $path"; exit 3; }
+          done
+          if test -d source/.github/workflows && find source/.github/workflows -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print -quit | grep -q .; then
+            echo '::error::Pantry must not own GitHub Actions workflows; Kura publication belongs to Pantry Core'
+            exit 4
+          fi
+
+      - name: Require protected publication credentials
+        if: ${{ steps.source.outputs.skip != 'true' }}
+        shell: bash
+        env:
+          PANTRY_SOURCE_RO: ${{ secrets.PANTRY_SOURCE_RO }}
+        run: |
+          set -euo pipefail
+          for name in PANTRY_SOURCE_RO KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM KYRON_CONTENT_PRIVATE_PEM KYRON_LAUNCH_CAPSULE_MASTER_HEX; do
+            test -n "${!name:-}" || { echo "::error::required protected secret is missing: $name"; exit 5; }
+          done
+
+      - name: Prepare canonical opaque snapshot in isolation
+        if: ${{ steps.source.outputs.skip != 'true' }}
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          sink="$GITHUB_WORKSPACE/cdn-sink.git"
+          stage="$GITHUB_WORKSPACE/cdn-stage"
+          prepared="$GITHUB_WORKSPACE/prepared"
+          rm -rf "$sink" "$stage" "$prepared"
+          git init --bare --quiet "$sink"
+          git init --quiet "$stage"
+          git -C "$stage" remote add origin "$sink"
+          python3 source/tests/test_prepare_snapshot_entrypoint.py
+          python3 source/tools/prepare_snapshot.py \
+            --source source \
+            --cdn "$stage" \
+            --source-sha "$SOURCE_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --branch main
+          git clone --quiet --branch main "$sink" "$prepared"
+
+      - name: Validate Kura-only prepared tree
+        if: ${{ steps.source.outputs.skip != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          root=Path('prepared')
+          rx=re.compile(r'^kura/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{28}\.bin$')
+          files=[]
+          for path in root.rglob('*'):
+              if not path.is_file() or '.git' in path.parts: continue
+              files.append(path.relative_to(root).as_posix())
+          if not files: raise SystemExit('[KURA][E] prepared snapshot is empty')
+          bad=[path for path in files if rx.fullmatch(path) is None]
+          if bad: raise SystemExit('[KURA][E] prepared tree escaped Kura ownership: '+', '.join(bad[:12]))
+          print(f'[KURA][PREPARED] files={len(files)}')
+          PY
+
+      - name: Replace only Pantry Core Kura payload
+        if: ${{ steps.source.outputs.skip != 'true' }}
+        id: delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf core/kura
+          cp -a prepared/kura core/kura
+          git -C core add -A -- kura
+          outside="$(git -C core status --porcelain --untracked-files=all | awk '{p=$2; if (p !~ /^kura\//) print}' || true)"
+          test -z "$outside" || { echo "::error::publication touched non-Kura Pantry Core paths"; printf '%s\n' "$outside"; exit 6; }
+          if git -C core diff --cached --quiet -- kura; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo '[KURA][DELTA] no content change'
+            exit 0
+          fi
+          bad="$(git -C core diff --cached --name-only --diff-filter=ACDMRTUXB | grep -Ev '^kura/' || true)"
+          test -z "$bad" || { echo "::error::staged path escaped kura/**"; printf '%s\n' "$bad"; exit 7; }
+          count="$(git -C core diff --cached --name-only -- kura | wc -l | tr -d ' ')"
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+          echo "[KURA][DELTA] paths=$count"
+
+      - name: Commit and push Kura-only publication
+        if: ${{ steps.source.outputs.skip != 'true' && steps.delta.outputs.changed == 'true' }}
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git -C core config user.name 'kura-mon-publisher'
+          git -C core config user.email 'kura-mon-publisher@users.noreply.github.com'
+          git -C core commit -m "kura: publish Pantry ${SOURCE_SHA:0:12}" -m "Pantry-Source: $SOURCE_SHA"
+          pushed=false
+          for attempt in 1 2 3 4 5; do
+            if git -C core push origin HEAD:main; then pushed=true; break; fi
+            echo "[KURA][PUSH/RETRY] attempt=$attempt"
+            git -C core fetch origin main
+            git -C core rebase origin/main
+          done
+          test "$pushed" = true || { echo '::error::Pantry Core push did not converge'; exit 8; }
+          local_sha="$(git -C core rev-parse HEAD)"
+          remote_sha="$(git -C core ls-remote --refs origin refs/heads/main | awk '{print $1}')"
+          test "$local_sha" = "$remote_sha" || { echo "::error::Pantry Core remote verification failed expected=$local_sha got=$remote_sha"; exit 9; }
+          echo "[KURA][PUBLISH/OK] pantry=$SOURCE_SHA core=$remote_sha"
