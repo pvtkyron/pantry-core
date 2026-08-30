@@ -3,7 +3,7 @@ name: 静的整合性検証
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [main]
 
 permissions:
   contents: read
