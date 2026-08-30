@@ -40,6 +40,22 @@ jobs:
           path: core
           fetch-depth: 0
 
+      - name: Require private repository checkout credentials
+        shell: bash
+        env:
+          KYRON_WORKSPACE_RO: ${{ secrets.KYRON_WORKSPACE_RO }}
+          KYRON_PANTRY_RW: ${{ secrets.KYRON_PANTRY_RW }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "${KYRON_WORKSPACE_RO:-}" ]] || missing+=(KYRON_WORKSPACE_RO)
+          [[ -n "${KYRON_PANTRY_RW:-}" ]] || missing+=(KYRON_PANTRY_RW)
+          if ((${#missing[@]})); then
+            printf '::error::required Actions secret is missing: %s\n' "${missing[@]}"
+            exit 5
+          fi
+          echo '[KURA][CREDENTIALS] private checkout credentials are present'
+
       - name: Checkout private Workspace
         uses: actions/checkout@v6
         with:
