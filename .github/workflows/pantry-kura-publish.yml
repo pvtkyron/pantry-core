@@ -1,6 +1,10 @@
 name: Kura Release Hub
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pantry-kura-publish.yml
   workflow_dispatch:
     inputs:
       force_rebuild:
