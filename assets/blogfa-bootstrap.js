@@ -3,15 +3,15 @@ if(window.__REV_BOOTSTRAP__)return;
 window.__REV_BOOTSTRAP__=1;
 window.REV_BOOTSTRAP_VERSION='2026.08.20.1';
 document.documentElement.lang='ja';
-const OWNER='pvtkyron',REPO='Live2dOnWebv1.0.0',TG='https://t.me/project_rev',SCHEMA='https://schema.org';
+const OWNER='pvtkyron',REPO='pantry-core',TG='https://t.me/project_rev',SCHEMA='https://schema.org';
 const ROOT=document.getElementById('rev-root'),BLOG=(window.REV_BLOG_URL||location.origin+location.pathname).replace(/\/$/,'');
 const NATIVE=window.REV_NATIVE_MODE||/^\/(post|archive|posts|category|tag|author)(?:\/|$)/i.test(location.pathname);
 if(NATIVE){document.documentElement.classList.add('rev-native-mode');return;}
 if(!ROOT)return;
-let BASE='https://cdn.jsdelivr.net/gh/'+OWNER+'/'+REPO+'@master/';
+let BASE='https://cdn.jsdelivr.net/gh/'+OWNER+'/'+REPO+'@main/';
 const resolveBase=async()=>{
     try{
-        const r=await fetch('https://api.github.com/repos/'+OWNER+'/'+REPO+'/commits/master',{cache:'no-store',headers:{Accept:'application/vnd.github+json'}});
+        const r=await fetch('https://api.github.com/repos/'+OWNER+'/'+REPO+'/commits/main',{cache:'no-store',headers:{Accept:'application/vnd.github+json'}});
         if(r.ok){const j=await r.json();if(j&&j.sha)BASE='https://cdn.jsdelivr.net/gh/'+OWNER+'/'+REPO+'@'+j.sha+'/';}
     }catch(e){}
 };
@@ -30,8 +30,8 @@ const routeFrom=(href,current)=>{
         let f='';
         if(/^https?:\/\//i.test(href)){
             const u=new URL(href);
-            if(u.hostname==='pvtkyron.github.io')f=u.pathname.split('/Live2dOnWebv1.0.0/')[1]||'index.html';
-            else if(u.hostname==='cdn.jsdelivr.net'&&u.pathname.includes('/Live2dOnWebv1.0.0@'))f=u.pathname.split(/Live2dOnWebv1\.0\.0@[^/]+\//)[1]||'index.html';
+            if(u.hostname==='pvtkyron.github.io')f=u.pathname.split('/pantry-core/')[1]||'index.html';
+            else if(u.hostname==='cdn.jsdelivr.net'&&u.pathname.includes('/pantry-core@'))f=u.pathname.split(/pantry-core@[^/]+\//)[1]||'index.html';
             else return null;
         }else{
             f=new URL(href,'https://rev.local/'+current).pathname.replace(/^\//,'');
