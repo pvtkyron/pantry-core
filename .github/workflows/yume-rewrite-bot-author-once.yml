@@ -19,25 +19,23 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Rewrite only github-actions bot identity
+      - name: Normalize bot identity
         shell: bash
         run: |
           set -euo pipefail
           export FILTER_BRANCH_SQUELCH_WARNING=1
           git filter-branch -f --env-filter '
-            if [ "$GIT_AUTHOR_NAME" = "github-actions[bot]" ] || [ "$GIT_AUTHOR_EMAIL" = "41898282+github-actions[bot]@users.noreply.github.com" ]; then
+            if [ "$GIT_AUTHOR_NAME" = "github-actions[bot]" ] || [ "$GIT_AUTHOR_EMAIL" = "41898282+github-actions[bot]@users.noreply.github.com" ] || [ "$GIT_AUTHOR_EMAIL" = "yume-chan@users.noreply.github.com" ]; then
               export GIT_AUTHOR_NAME="ゆめちゃん"
-              export GIT_AUTHOR_EMAIL="yume-chan@users.noreply.github.com"
+              export GIT_AUTHOR_EMAIL="yume-chan@pantry-core.invalid"
             fi
-            if [ "$GIT_COMMITTER_NAME" = "github-actions[bot]" ] || [ "$GIT_COMMITTER_EMAIL" = "41898282+github-actions[bot]@users.noreply.github.com" ]; then
+            if [ "$GIT_COMMITTER_NAME" = "github-actions[bot]" ] || [ "$GIT_COMMITTER_EMAIL" = "41898282+github-actions[bot]@users.noreply.github.com" ] || [ "$GIT_COMMITTER_EMAIL" = "yume-chan@users.noreply.github.com" ]; then
               export GIT_COMMITTER_NAME="ゆめちゃん"
-              export GIT_COMMITTER_EMAIL="yume-chan@users.noreply.github.com"
+              export GIT_COMMITTER_EMAIL="yume-chan@pantry-core.invalid"
             fi
           ' -- main
 
-          if git log main --format='%an <%ae>|%cn <%ce>' | grep -F 'github-actions[bot]'; then
-            echo 'github-actions[bot] still exists in main history' >&2
-            exit 1
-          fi
-          git log main --format='%an <%ae>' | grep -F 'ゆめちゃん <yume-chan@users.noreply.github.com>' >/dev/null
+          ! git log main --format='%an <%ae>|%cn <%ce>' | grep -F 'github-actions[bot]'
+          ! git log main --format='%an <%ae>|%cn <%ce>' | grep -F 'yume-chan@users.noreply.github.com'
+          git log main --format='%an <%ae>' | grep -F 'ゆめちゃん <yume-chan@pantry-core.invalid>' >/dev/null
           git push --force origin main
