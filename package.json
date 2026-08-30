@@ -41,7 +41,7 @@
     "typescript": "^3.7.5",
     "webpack": "^5.22",
     "webpack-cli": "^4.5",
-    "webpack-dev-server": "^3.11.2"
+    "webpack-dev-server": "^6.0.0"
   },
   "dependencies": {"whatwg-fetch": "^3.0.0"}
 }
