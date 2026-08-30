@@ -40,21 +40,16 @@ jobs:
           path: core
           fetch-depth: 0
 
-      - name: Require private repository checkout credentials
+      - name: Require private checkout credentials
         shell: bash
         env:
           KYRON_WORKSPACE_RO: ${{ secrets.KYRON_WORKSPACE_RO }}
           KYRON_PANTRY_RW: ${{ secrets.KYRON_PANTRY_RW }}
         run: |
           set -euo pipefail
-          missing=()
-          [[ -n "${KYRON_WORKSPACE_RO:-}" ]] || missing+=(KYRON_WORKSPACE_RO)
-          [[ -n "${KYRON_PANTRY_RW:-}" ]] || missing+=(KYRON_PANTRY_RW)
-          if ((${#missing[@]})); then
-            printf '::error::required Actions secret is missing: %s\n' "${missing[@]}"
-            exit 5
-          fi
-          echo '[KURA][CREDENTIALS] private checkout credentials are present'
+          for name in KYRON_WORKSPACE_RO KYRON_PANTRY_RW; do
+            [[ -n "${!name:-}" ]] || { echo "::error::required Actions secret is missing: $name"; exit 5; }
+          done
 
       - name: Checkout private Workspace
         uses: actions/checkout@v6
@@ -80,7 +75,7 @@ jobs:
           persist-credentials: true
           show-progress: false
 
-      - name: Enforce ownership and decide whether a build is needed
+      - name: Enforce ownership and publication state
         id: state
         shell: bash
         run: |
@@ -93,9 +88,10 @@ jobs:
             echo '::error::private Pantry must not own Actions workflows'
             exit 4
           fi
-          test -z "$(git -C workspace status --porcelain --untracked-files=normal)"
-          test -z "$(git -C pantry status --porcelain --untracked-files=normal)"
-          test -z "$(git -C core status --porcelain --untracked-files=normal)"
+          for repo in workspace pantry core; do
+            test -z "$(git -C "$repo" status --porcelain --untracked-files=normal)" || { echo "::error::$repo checkout is dirty"; exit 6; }
+          done
+
           workspace_sha="$(git -C workspace rev-parse HEAD)"
           pantry_sha="$(git -C pantry rev-parse HEAD)"
           core_sha="$(git -C core rev-parse HEAD)"
@@ -103,14 +99,13 @@ jobs:
           provenance_workspace="$(python3 - <<'PY'
           import json
           from pathlib import Path
-          path=Path('pantry/release/delivery-provenance-v1.json')
-          try:
-              value=json.loads(path.read_text(encoding='utf-8-sig')) if path.is_file() else {}
-          except Exception:
-              value={}
-          print(str(value.get('workspace_sha','')).strip().lower())
+          p=Path('pantry/release/delivery-provenance-v1.json')
+          try:v=json.loads(p.read_text(encoding='utf-8-sig')) if p.is_file() else {}
+          except Exception:v={}
+          print(str(v.get('workspace_sha','')).strip().lower())
           PY
           )"
+
           tag_target=''; tag_source=''; tag_core=''; tag_kura=''
           if git -C pantry fetch --force origin refs/tags/kyron-kura-published:refs/tags/kyron-kura-published >/dev/null 2>&1; then
             tag_target="$(git -C pantry rev-list -n1 refs/tags/kyron-kura-published 2>/dev/null || true)"
@@ -119,6 +114,7 @@ jobs:
             tag_core="$(sed -n 's/^core=//p' <<<"$tag_message" | tail -n1)"
             tag_kura="$(sed -n 's/^kura_tree=//p' <<<"$tag_message" | tail -n1)"
           fi
+
           needs=true
           if [[ "$provenance_workspace" == "$workspace_sha" && "$tag_target" == "$pantry_sha" && "$tag_source" == "$pantry_sha" && -n "$core_kura" && "$tag_kura" == "$core_kura" ]]; then
             needs=false
@@ -126,10 +122,10 @@ jobs:
           echo "needs_publish=$needs" >> "$GITHUB_OUTPUT"
           echo "workspace_sha=$workspace_sha" >> "$GITHUB_OUTPUT"
           echo "pantry_sha=$pantry_sha" >> "$GITHUB_OUTPUT"
-          echo "[KURA][GATE] needs=$needs workspace=$workspace_sha pantry=$pantry_sha core=$core_sha kura=${core_kura:-missing} tag_core=${tag_core:-missing} provenance_workspace=${provenance_workspace:-missing}"
+          echo "[KURA][GATE] needs=$needs workspace=$workspace_sha pantry=$pantry_sha core=$core_sha kura=${core_kura:-missing} tag_core=${tag_core:-missing}"
 
   build-and-publish:
-    name: Build Workspace + Pantry and overlay Kura
+    name: Build Workspace + Pantry into Core Kura
     needs: gate
     if: ${{ needs.gate.outputs.needs_publish == 'true' || (github.event_name == 'workflow_dispatch' && inputs.force_rebuild) }}
     permissions:
@@ -175,7 +171,7 @@ jobs:
           persist-credentials: true
           show-progress: false
 
-      - name: Require protected release credentials
+      - name: Materialize protected release signer
         shell: pwsh
         env:
           KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets.KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM }}
@@ -195,7 +191,11 @@ jobs:
           try{
             if(!$cert.HasPrivateKey){throw 'release PFX does not contain a private key'}
             $eku=$false
-            foreach($ext in $cert.Extensions){if($ext -is [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]){foreach($oid in $ext.EnhancedKeyUsages){if($oid.Value -eq '1.3.6.1.5.5.7.3.3'){$eku=$true}}}}
+            foreach($ext in $cert.Extensions){
+              if($ext -is [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]){
+                foreach($oid in $ext.EnhancedKeyUsages){if($oid.Value -eq '1.3.6.1.5.5.7.3.3'){$eku=$true}}
+              }
+            }
             if(!$eku){throw 'release PFX is not a Code Signing certificate'}
             if($cert.Subject -eq $cert.Issuer){
               $cer=Join-Path $env:RUNNER_TEMP 'kyron-codesign.cer'
@@ -204,16 +204,12 @@ jobs:
               Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
               "KYRON_CODESIGN_TEMP_TRUST=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
               Remove-Item -LiteralPath $cer -Force
-              Write-Host "[KURA][SIGNER/TRUSTED] self-signed thumbprint=$($cert.Thumbprint) scope=CurrentUser"
             }
           }finally{$cert.Dispose()}
           "KYRON_CODESIGN_PFX=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host '[KURA][SIGNER/READY] protected code-signing identity materialized for this job only'
 
-      - name: Provision exact locked Workspace toolchains
-        shell: cmd
-        run: call "${{ github.workspace }}\workspace\SETUP_WORKSPACE.bat"
-
-      - name: Build, stage private Pantry, prepare and publish Kura
+      - name: Run canonical local-and-hosted release entrypoint
         shell: pwsh
         env:
           KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets.KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM }}
@@ -221,13 +217,18 @@ jobs:
           KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
         run: |
           $ErrorActionPreference='Stop'
-          $batch=Join-Path $env:GITHUB_WORKSPACE 'workspace\PREPARE_AND_PUBLISH_PANTRY_CORE.bat'
-          $args=@('-PantryPath',(Join-Path $env:GITHUB_WORKSPACE 'pantry'),'-PantryCorePath',(Join-Path $env:GITHUB_WORKSPACE 'core'),'-RuntimeChannel','both','-IncludeLauncher','-RunId','${{ github.run_id }}','-RunAttempt','${{ github.run_attempt }}')
+          $batch=Join-Path $env:GITHUB_WORKSPACE 'workspace\BUILD_AND_PUBLISH_PANTRY_CORE.bat'
+          $args=@(
+            '-PantryPath',(Join-Path $env:GITHUB_WORKSPACE 'pantry'),
+            '-PantryCorePath',(Join-Path $env:GITHUB_WORKSPACE 'core'),
+            '-RunId','${{ github.run_id }}',
+            '-RunAttempt','${{ github.run_attempt }}'
+          )
           if('${{ inputs.force_rebuild }}' -eq 'true'){$args+='-ForceRebuild'}
           & $batch @args
           if($LASTEXITCODE-ne0){throw "canonical Kura release transaction failed: $LASTEXITCODE"}
 
-      - name: Verify remote Kura ownership and private publication tag
+      - name: Verify remote Kura and private publication receipt
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -239,12 +240,17 @@ jobs:
           if(!$paths.Count){throw 'published Kura tree is empty'}
           $bad=@($paths|Where-Object{$_ -notmatch '^kura/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{28}\.bin$'})
           if($bad.Count){throw "non-opaque path escaped Kura publication: $($bad[0])"}
+
           git -C pantry fetch --prune origin main
           if($LASTEXITCODE-ne0){throw 'private Pantry main fetch failed'}
           git -C pantry fetch --force origin refs/tags/kyron-kura-published:refs/tags/kyron-kura-published
           if($LASTEXITCODE-ne0){throw 'private publication tag fetch failed'}
-          $pantry=(git -C pantry rev-parse refs/remotes/origin/main).Trim();$target=(git -C pantry rev-list -n1 refs/tags/kyron-kura-published).Trim();$message=(git -C pantry tag -l kyron-kura-published --format='%(contents)') -join "`n"
-          $tagSource=([regex]::Match($message,'(?m)^source=([0-9a-f]{40})$')).Groups[1].Value;$tagCore=([regex]::Match($message,'(?m)^core=([0-9a-f]{40})$')).Groups[1].Value;$tagKura=([regex]::Match($message,'(?m)^kura_tree=([0-9a-f]{40})$')).Groups[1].Value
+          $pantry=(git -C pantry rev-parse refs/remotes/origin/main).Trim()
+          $target=(git -C pantry rev-list -n1 refs/tags/kyron-kura-published).Trim()
+          $message=(git -C pantry tag -l kyron-kura-published --format='%(contents)') -join "`n"
+          $tagSource=([regex]::Match($message,'(?m)^source=([0-9a-f]{40})$')).Groups[1].Value
+          $tagCore=([regex]::Match($message,'(?m)^core=([0-9a-f]{40})$')).Groups[1].Value
+          $tagKura=([regex]::Match($message,'(?m)^kura_tree=([0-9a-f]{40})$')).Groups[1].Value
           if($target-ne$pantry-or$tagSource-ne$pantry-or$tagCore-ne$core-or$tagKura-ne$kura){throw "publication tag mismatch pantry=$pantry target=$target core=$core tagCore=$tagCore kura=$kura tagKura=$tagKura"}
           Write-Host "[KURA][REMOTE/OK] pantry=$pantry core=$core kura=$kura records=$($paths.Count)"
 
