@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://pvtkyron.github.io/Live2dOnWebv1.0.0/sitemap.xml

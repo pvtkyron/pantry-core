@@ -1,0 +1,12 @@
+{
+  "name": "Project Rev 改 — Project Rev Editorial",
+  "short_name": "Project Rev",
+  "description": "GitHubを情報源とするProject Revのストア、ジャーナル、購入ガイド。編集版。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f2ede3",
+  "theme_color": "#d63b24",
+  "lang": "ja",
+  "dir": "ltr"
+}
