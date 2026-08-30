@@ -14,7 +14,7 @@ on:
     - cron: '17 * * * *'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: kura-release-hub-main
@@ -112,6 +112,8 @@ jobs:
     name: Build Workspace + Pantry and overlay Kura
     needs: gate
     if: ${{ needs.gate.outputs.needs_publish == 'true' || (github.event_name == 'workflow_dispatch' && inputs.force_rebuild) }}
+    permissions:
+      contents: write
     runs-on: ${{ fromJSON(vars.KYRON_WINDOWS_RUNNER_JSON || '["windows-2025"]') }}
     timeout-minutes: 360
     env:
@@ -200,7 +202,9 @@ jobs:
           if(!$paths.Count){throw 'published Kura tree is empty'}
           $bad=@($paths|Where-Object{$_ -notmatch '^kura/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{28}\.bin$'})
           if($bad.Count){throw "non-opaque path escaped Kura publication: $($bad[0])"}
-          git -C pantry fetch --force origin main refs/tags/kyron-kura-published:refs/tags/kyron-kura-published
+          git -C pantry fetch --prune origin main
+          if($LASTEXITCODE-ne0){throw 'private Pantry main fetch failed'}
+          git -C pantry fetch --force origin refs/tags/kyron-kura-published:refs/tags/kyron-kura-published
           if($LASTEXITCODE-ne0){throw 'private publication tag fetch failed'}
           $pantry=(git -C pantry rev-parse refs/remotes/origin/main).Trim();$target=(git -C pantry rev-list -n1 refs/tags/kyron-kura-published).Trim();$message=(git -C pantry tag -l kyron-kura-published --format='%(contents)') -join "`n"
           $tagSource=([regex]::Match($message,'(?m)^source=([0-9a-f]{40})$')).Groups[1].Value;$tagCore=([regex]::Match($message,'(?m)^core=([0-9a-f]{40})$')).Groups[1].Value;$tagKura=([regex]::Match($message,'(?m)^kura_tree=([0-9a-f]{40})$')).Groups[1].Value
