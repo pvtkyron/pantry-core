@@ -3,9 +3,9 @@ name: ゆめちゃん 🌸 Main Guardian
 on:
   create:
   push:
-    branches: [main]
-    paths:
-      - .github/workflows/yume-main-guardian.yml
+    branches-ignore: [main]
+  schedule:
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -19,6 +19,7 @@ jobs:
       - name: mainを守る
         uses: actions/checkout@v6
         with:
+          ref: main
           fetch-depth: 1
 
       - name: main以外のブランチを削除
@@ -31,5 +32,5 @@ jobs:
             branch="${ref#refs/heads/}"
             [[ "$branch" == main ]] && continue
             echo "Deleting branch: $branch"
-            git push origin --delete "$branch"
+            git push origin --delete "$branch" || true
           done < <(git ls-remote --heads origin)
