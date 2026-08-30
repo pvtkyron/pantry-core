@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: リポジトリをチェックアウト
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Node.jsをセットアップ
         uses: actions/setup-node@v6
