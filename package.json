@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "description": "Project Revの静的ストア、Blogfa互換ランタイム、Live2D Web表示レイヤー。",
-  "homepage": "https://pvtkyron.github.io/Live2dOnWebv1.0.0/",
-  "repository": {"type":"git","url":"https://github.com/pvtkyron/Live2dOnWebv1.0.0.git"},
+  "homepage": "https://pvtkyron.github.io/pantry-core/",
+  "repository": {"type":"git","url":"https://github.com/pvtkyron/pantry-core.git"},
   "keywords": ["live2d","project-rev","static-site","blogfa","storefront"],
   "scripts": {
     "build:css": "node scripts/build-editorial-css.js",
