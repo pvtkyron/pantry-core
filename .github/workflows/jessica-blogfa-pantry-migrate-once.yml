@@ -35,7 +35,8 @@ jobs:
           for name in files:
               p=Path(name)
               s=p.read_text(encoding='utf-8')
-              s=s.replace("REPO='Live2dOnWebv1.0.0'","REPO='pantry-core'")
+              s=s.replace('Live2dOnWebv1.0.0','pantry-core')
+              s=s.replace(r'Live2dOnWebv1\.0\.0','pantry-core')
               s=s.replace('@master/','@main/')
               s=s.replace('?ref=master','?ref=main')
               s=s.replace('/commits/master','/commits/main')
@@ -44,18 +45,15 @@ jobs:
               s=s.replace("'master fallback'","'main fallback'")
               s=s.replace("{name:'master'","{name:'main'")
               s=s.replace("'jsdelivr-master'","'jsdelivr-main'")
-              s=s.replace("jd('master',p)","jd('main',p)")
-              s=s.replace("jd('master','')","jd('main','')")
-              s=s.replace('/Live2dOnWebv1.0.0/','/pantry-core/')
-              s=s.replace('Live2dOnWebv1\\.0\\.0@','pantry-core@')
               p.write_text(s,encoding='utf-8')
+          stale=('Live2dOnWebv1.0.0',r'Live2dOnWebv1\.0\.0','@master/','?ref=master','/commits/master')
           bad=[]
           for name in files:
               s=Path(name).read_text(encoding='utf-8')
-              if 'Live2dOnWebv1.0.0' in s or '@master/' in s or '?ref=master' in s or '/commits/master' in s:
-                  bad.append(name)
+              found=[x for x in stale if x in s]
+              if found: bad.append((name,found))
           if bad:
-              raise SystemExit('stale refs remain: '+', '.join(bad))
+              raise SystemExit('stale refs remain: '+repr(bad))
           PY
           git diff --check
           git config user.name 'Jessica'
