@@ -1,0 +1,86 @@
+name: 継続的検証
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: ビルドと検証
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v6
+
+      - name: Node.jsをセットアップ
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      - name: 本番依存関係を監査
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: 本番バンドルをビルド
+        run: npm run build:prod
+
+      - name: 生成済みバンドルを確認
+        run: test -s dist/live2d_bundle.js
+
+      - name: 配信・キャッシュ契約を検証
+        run: npm run check:delivery
+
+      - name: Live2Dランタイム契約を検証
+        run: npm run check:runtime
+
+      - name: JavaScript構文を確認
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check waifu-tips.js
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find assets -maxdepth 1 -type f -name '*.js' -print0 | sort -z)
+          node --check scripts/build-editorial-css.js
+          node --check scripts/check-delivery.js
+          node --check scripts/check-live2d-runtime.js
+          node --check scripts/validate-static-site.js
+
+      - name: ランタイムJSONを検証
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('waifu-tips.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('assets/blogfa-runtime-manifest.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('site.webmanifest','utf8'))"
+
+      - name: 静的リンク・モデル参照を検証
+        run: npm run check:static
+
+      - name: 日本語ローカライズを検証
+        run: npm run check:ja
+
+      - name: Blogfaレスポンシブを検証
+        run: npm run check:blogfa
+
+      - name: プレミアム軽量タイポグラフィを検証
+        run: npm run check:type
+
+      - name: REV vNext discovery / performance を検証
+        run: npm run check:vnext
+
+      - name: Project Rev Editorial再設計を検証
+        run: npm run check:editorial
