@@ -15,7 +15,7 @@ jobs:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v6
       - name: Node.jsをセットアップ
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: ローカルリンク・サイトマップ・モデル参照を検証
