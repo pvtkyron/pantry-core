@@ -1,0 +1,35 @@
+name: ゆめちゃん 🌸 Main Guardian
+
+on:
+  create:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/yume-main-guardian.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  main-only:
+    name: ゆめちゃん・mainだけ
+    runs-on: ubuntu-latest
+    steps:
+      - name: mainを守る
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: main以外のブランチを削除
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'ゆめちゃん'
+          git config user.email 'yume-chan@users.noreply.github.com'
+          while read -r _ ref; do
+            branch="${ref#refs/heads/}"
+            [[ "$branch" == main ]] && continue
+            echo "Deleting branch: $branch"
+            git push origin --delete "$branch"
+          done < <(git ls-remote --heads origin)
