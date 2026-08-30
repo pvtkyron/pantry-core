@@ -21,12 +21,11 @@ jobs:
       - name: Clone Live2D source
         run: git clone --depth 1 --branch master https://github.com/pvtkyron/Live2dOnWebv1.0.0.git /tmp/live2d
 
-      - name: Import without touching kura
+      - name: Import without touching kura or workflows
         shell: bash
         run: |
           set -euo pipefail
-          rsync -a --exclude='.git' --exclude='kura' /tmp/live2d/ "$GITHUB_WORKSPACE/"
-          rm -f .github/workflows/import-live2d-once.yml
+          rsync -a --exclude='.git' --exclude='kura' --exclude='.github/workflows' /tmp/live2d/ "$GITHUB_WORKSPACE/"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
