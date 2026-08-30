@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           git config user.name 'ゆめちゃん'
-          git config user.email 'yume-chan@users.noreply.github.com'
+          git config user.email 'yume-chan@pantry-core.invalid'
           while read -r _ ref; do
             branch="${ref#refs/heads/}"
             [[ "$branch" == main ]] && continue
