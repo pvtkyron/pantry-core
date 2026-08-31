@@ -45,7 +45,7 @@ jobs:
           path: core
           fetch-depth: 0
 
-      - name: Require private checkout credentials
+      - name: Require private repository credentials
         shell: bash
         env:
           KYRON_WORKSPACE_RO: ${{ secrets.KYRON_WORKSPACE_RO }}
@@ -105,8 +105,10 @@ jobs:
           import json
           from pathlib import Path
           p=Path('pantry/release/delivery-provenance-v1.json')
-          try:v=json.loads(p.read_text(encoding='utf-8-sig')) if p.is_file() else {}
-          except Exception:v={}
+          try:
+              v=json.loads(p.read_text(encoding='utf-8-sig')) if p.is_file() else {}
+          except Exception:
+              v={}
           print(str(v.get('workspace_sha','')).strip().lower())
           PY
           )"
@@ -140,6 +142,8 @@ jobs:
     env:
       KYRON_VS_BUILD: '1'
       KYRON_NONINTERACTIVE: '1'
+      KYRON_WORKSPACE_STATE_ROOT: ${{ runner.temp }}\kyron-state
+      KYRON_WORKSPACE_DATA_ROOT: ${{ runner.temp }}\kyron-state
       ComSpec: C:\Windows\System32\cmd.exe
     outputs:
       workspace_sha: ${{ steps.verify.outputs.workspace_sha }}
@@ -164,35 +168,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Provision Compiler Android SDK and Smali
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $sdk=if($env:ANDROID_SDK_ROOT){$env:ANDROID_SDK_ROOT}elseif($env:ANDROID_HOME){$env:ANDROID_HOME}else{''}
-          if([string]::IsNullOrWhiteSpace($sdk)){throw 'GitHub Windows runner did not expose an Android SDK root'}
-          $sdk=[IO.Path]::GetFullPath($sdk)
-          $manager=Get-ChildItem -LiteralPath (Join-Path $sdk 'cmdline-tools') -Filter sdkmanager.bat -File -Recurse -ErrorAction SilentlyContinue|Select-Object -First 1
-          if(!$manager){throw "sdkmanager.bat not found under $sdk"}
-          $savedPreference=$ErrorActionPreference;$ErrorActionPreference='Continue'
-          & $manager.FullName "--sdk_root=$sdk" 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
-          $sdkCode=$LASTEXITCODE;$ErrorActionPreference=$savedPreference
-          if($sdkCode-ne0){throw "Android SDK package provisioning failed: $sdkCode"}
-          foreach($relative in 'platforms\android-36\android.jar','build-tools\36.0.0\aapt2.exe','build-tools\36.0.0\zipalign.exe','build-tools\36.0.0\lib\apksigner.jar'){
-            $required=Join-Path $sdk $relative
-            if(!(Test-Path -LiteralPath $required -PathType Leaf)){throw "Compiler Android dependency missing after provisioning: $required"}
-          }
-          $smali=Join-Path $env:RUNNER_TEMP 'smali-3.0.9-fat-release.jar'
-          $uri='https://github.com/baksmali/smali/releases/download/3.0.9/smali-3.0.9-fat-release.jar'
-          & curl.exe -L --fail --retry 4 --retry-delay 2 --output $smali $uri
-          if($LASTEXITCODE-ne0-or!(Test-Path -LiteralPath $smali -PathType Leaf)){throw 'Smali 3.0.9 download failed'}
-          $expected='b5e2aa019c49ddaf7b2cace80f60ebbfd61f7ac18e7a3dea1075bec8779cc37a'
-          $actual=(Get-FileHash -LiteralPath $smali -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($actual-ne$expected){throw "Smali checksum mismatch: expected=$expected actual=$actual"}
-          "KYRON_COMPILER_ANDROID_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "KYRON_SMALI_JAR=$smali" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "[COMPILER][TOOLCHAIN/OK] sdk=$sdk smali_sha256=$actual java=$env:JAVA_HOME"
+      - name: Provision Workspace toolchains
+        shell: cmd
+        run: call workspace\SETUP_WORKSPACE.bat
 
-      - name: Validate Compiler source and signing contracts
+      - name: Validate and build fresh unsigned Compiler APKs
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -201,27 +181,8 @@ jobs:
           if(!$?){throw 'Compiler signing contract validation failed'}
           & .\workspace\Compiler\tools\test-signing-identity.ps1
           if(!$?){throw 'Compiler signing identity regression test failed'}
-          & .\workspace\Compiler\KYRON.ps1 Validate -AndroidSdk $env:KYRON_COMPILER_ANDROID_SDK -SmaliJar $env:KYRON_SMALI_JAR
-          if(!$?){throw 'Compiler project validation failed'}
-
-      - name: Build fresh unsigned 32-bit and 64-bit Compiler APKs
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $root=Join-Path $env:GITHUB_WORKSPACE 'workspace\Compiler'
-          $sdk=$env:KYRON_COMPILER_ANDROID_SDK
-          $smali=$env:KYRON_SMALI_JAR
-          foreach($value in @($root,$sdk,$smali)){if([string]::IsNullOrWhiteSpace($value)){throw 'Compiler build dependency resolution failed'}}
-          $env:KYRON_ANDROID_SDK=$sdk;$env:ANDROID_SDK_ROOT=$sdk;$env:ANDROID_HOME=$sdk;$env:KYRON_SMALI_JAR=$smali
-          & (Join-Path $root 'tools\clean-project.ps1')
-          if(!$?){throw 'Compiler clean failed'}
-          & (Join-Path $root 'tools\preflight.ps1') -AndroidSdk $sdk -SmaliJar $smali
-          if(!$?){throw 'Compiler preflight failed'}
-          & (Join-Path $root 'tools\build-all.ps1') -NoSign
+          & .\workspace\Compiler\KYRON.ps1 AutoBuildAll -NoSign
           if(!$?){throw 'Compiler dual-ABI unsigned build failed'}
-          $apk=Join-Path $root 'apk'
-          Move-Item -LiteralPath (Join-Path $apk 'Kyron-32.apk') -Destination (Join-Path $apk 'loader-32.apk') -Force
-          Move-Item -LiteralPath (Join-Path $apk 'Kyron-64.apk') -Destination (Join-Path $apk 'loader.apk') -Force
 
       - name: Verify Compiler APK structure and ABI isolation
         id: verify
@@ -240,7 +201,6 @@ jobs:
             if(!(Test-Path -LiteralPath $path -PathType Leaf)){throw "Compiler APK missing: $path"}
             $item=Get-Item -LiteralPath $path
             if($item.Length-lt4096){throw "Compiler APK is unexpectedly small: $($spec.Name) bytes=$($item.Length)"}
-            $head=[IO.File]::ReadAllBytes($path);if($head.Length-lt4-or$head[0]-ne0x50-or$head[1]-ne0x4b){throw "Compiler output is not an APK/ZIP: $($spec.Name)"}
             $zip=[IO.Compression.ZipFile]::OpenRead($path)
             try{
               $entries=@($zip.Entries|ForEach-Object FullName)
@@ -252,16 +212,8 @@ jobs:
               $machine=[BitConverter]::ToUInt16($elf,18)
               if($elf[4]-ne$spec.ElfClass-or$machine-ne$spec.Machine){throw "$($spec.Name) native ABI mismatch: class=$($elf[4]) machine=$machine"}
             }finally{$zip.Dispose()}
-            $java=Join-Path $env:JAVA_HOME 'bin\java.exe';$signer=Join-Path $env:KYRON_COMPILER_ANDROID_SDK 'build-tools\36.0.0\lib\apksigner.jar'
-            $savedPreference=$ErrorActionPreference;$ErrorActionPreference='Continue'
-            $signatureText=((& $java -jar $signer verify $path 2>&1|Out-String).Trim());$signatureCode=$LASTEXITCODE
-            $ErrorActionPreference=$savedPreference
-            if($signatureCode-eq0){throw "$($spec.Name) was unexpectedly signed in CI"}
-            if($signatureText-notmatch'(?i)DOES NOT VERIFY|not signed|no signatures'){throw "APK signature verifier failed unexpectedly for $($spec.Name): $signatureText"}
-            Write-Host "[COMPILER][UNSIGNED/OK] $($spec.Name)"
             $sha=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
             "$($spec.Output)=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            "- $($spec.Name): ``$($spec.Abi)`` · $($item.Length) bytes · ``$sha``" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
             Write-Host "[COMPILER][APK/OK] file=$($spec.Name) abi=$($spec.Abi) bytes=$($item.Length) sha256=$sha"
           }
           "workspace_sha=$workspace" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -269,7 +221,7 @@ jobs:
           if($dirty){throw "Compiler build mutated tracked Workspace state:`n$dirty"}
 
   build-and-publish:
-    name: Build Workspace + Pantry into Core Kura
+    name: Build Workspace -> prepare Pantry -> publish Core Kura
     needs: [gate, compiler]
     if: ${{ (needs.gate.outputs.needs_publish == 'true' || (github.event_name == 'workflow_dispatch' && inputs.force_rebuild)) && !(github.event_name == 'workflow_dispatch' && inputs.compiler_only) }}
     permissions:
@@ -279,11 +231,14 @@ jobs:
     env:
       KYRON_PANTRY_ROOT: ${{ github.workspace }}\pantry
       KYRON_PANTRY_CORE_ROOT: ${{ github.workspace }}\core
+      KYRON_WORKSPACE_STATE_ROOT: ${{ runner.temp }}\kyron-state
+      KYRON_WORKSPACE_DATA_ROOT: ${{ runner.temp }}\kyron-state
       KYRON_VS_BUILD: '1'
       KYRON_NONINTERACTIVE: '1'
       KYRON_CODESIGN_AUTOCREATE: '0'
+      ComSpec: C:\Windows\System32\cmd.exe
     steps:
-      - name: Checkout Pantry Core
+      - name: Checkout Pantry Core main
         uses: actions/checkout@v6
         with:
           ref: main
@@ -291,11 +246,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Checkout private Workspace
+      - name: Checkout private Workspace main
         uses: actions/checkout@v6
         with:
           repository: pvtkyron/Workspace
-          ref: ${{ needs.gate.outputs.workspace_sha }}
+          ref: main
           token: ${{ secrets.KYRON_WORKSPACE_RO }}
           path: workspace
           fetch-depth: 0
@@ -303,7 +258,7 @@ jobs:
           persist-credentials: true
           show-progress: false
 
-      - name: Checkout private Pantry
+      - name: Checkout private Pantry main
         uses: actions/checkout@v6
         with:
           repository: pvtkyron/pantry
@@ -315,59 +270,77 @@ jobs:
           persist-credentials: true
           show-progress: false
 
-      - name: Bind publication to verified Compiler revision
+      - name: Bind release to verified Workspace and Compiler revision
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
+          $branch=(git -C workspace symbolic-ref --short HEAD).Trim()
           $actual=(git -C workspace rev-parse HEAD).Trim().ToLowerInvariant()
           $gate='${{ needs.gate.outputs.workspace_sha }}'
           $compiler='${{ needs.compiler.outputs.workspace_sha }}'
+          if($branch-ne'main'){throw "Workspace release checkout must be main, got $branch"}
           if($actual-ne$gate-or$compiler-ne$gate){throw "Workspace/Compiler proof drift: checkout=$actual gate=$gate compiler=$compiler"}
           Write-Host "[COMPILER][BOUND] workspace=$actual loader32=${{ needs.compiler.outputs.loader32_sha }} loader64=${{ needs.compiler.outputs.loader64_sha }}"
 
-      - name: Materialize protected release signer
+      - name: Materialize stable Pantry signer and Windows release signer
         shell: pwsh
         env:
-          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets.KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM }}
-          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets.KYRON_CONTENT_PRIVATE_PEM }}
+          KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+          KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+          KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+          KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
           KYRON_CODESIGN_PFX_B64: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
           KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
         run: |
           $ErrorActionPreference='Stop'
-          foreach($name in 'KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM','KYRON_CONTENT_PRIVATE_PEM','KYRON_CODESIGN_PFX_B64','KYRON_CODESIGN_PASSWORD'){
-            if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))){throw "required release secret is missing: $name"}
+          $required=@(
+            'KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM','KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM',
+            'KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM','KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM',
+            'KYRON_CODESIGN_PFX_B64','KYRON_CODESIGN_PASSWORD'
+          )
+          foreach($name in $required){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))){throw "required release secret is missing: $name"}}
+
+          $signerRoot=Join-Path $env:KYRON_WORKSPACE_DATA_ROOT 'SigningKeys\PantryLocal\v1'
+          New-Item -ItemType Directory -Force -Path $signerRoot|Out-Null
+          $files=[ordered]@{
+            'bootstrap_root_private.pem'='KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM'
+            'bootstrap_root_public.pem'='KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM'
+            'content_private.pem'='KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM'
+            'content_public.pem'='KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM'
           }
+          foreach($pair in $files.GetEnumerator()){
+            $text=[Environment]::GetEnvironmentVariable($pair.Value).Trim()
+            [IO.File]::WriteAllText((Join-Path $signerRoot $pair.Key),$text+"`n",[Text.UTF8Encoding]::new($false))
+          }
+          $identity=& .\workspace\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $env:GITHUB_WORKSPACE 'pantry') -Workspace (Join-Path $env:GITHUB_WORKSPACE 'workspace')
+          if(!$identity-or[string]$identity.Profile-ne'local-machine-v1'){throw 'stable Pantry signer validation failed'}
+          "KYRON_ACTIONS_SIGNER_ROOT=$signerRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
           $pfx=Join-Path $env:RUNNER_TEMP 'kyron-codesign.pfx'
           [IO.File]::WriteAllBytes($pfx,[Convert]::FromBase64String($env:KYRON_CODESIGN_PFX_B64.Trim()))
-          if((Get-Item -LiteralPath $pfx).Length -lt 256){throw 'decoded code-signing PFX is unexpectedly small'}
+          if((Get-Item -LiteralPath $pfx).Length-lt256){throw 'decoded code-signing PFX is unexpectedly small'}
           $flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
           $cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$env:KYRON_CODESIGN_PASSWORD,$flags)
           try{
             if(!$cert.HasPrivateKey){throw 'release PFX does not contain a private key'}
             $eku=$false
-            foreach($ext in $cert.Extensions){
-              if($ext -is [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]){
-                foreach($oid in $ext.EnhancedKeyUsages){if($oid.Value -eq '1.3.6.1.5.5.7.3.3'){$eku=$true}}
-              }
-            }
+            foreach($ext in $cert.Extensions){if($ext -is [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]){foreach($oid in $ext.EnhancedKeyUsages){if($oid.Value-eq'1.3.6.1.5.5.7.3.3'){$eku=$true}}}}
             if(!$eku){throw 'release PFX is not a Code Signing certificate'}
-            if($cert.Subject -eq $cert.Issuer){
+            if($cert.Subject-eq$cert.Issuer){
               $cer=Join-Path $env:RUNNER_TEMP 'kyron-codesign.cer'
               [IO.File]::WriteAllBytes($cer,$cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
-              Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
-              Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
+              Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\Root|Out-Null
+              Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\TrustedPublisher|Out-Null
               "KYRON_CODESIGN_TEMP_TRUST=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
               Remove-Item -LiteralPath $cer -Force
             }
           }finally{$cert.Dispose()}
           "KYRON_CODESIGN_PFX=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host '[KURA][SIGNER/READY] protected code-signing identity materialized for this job only'
+          Write-Host '[KURA][SIGNER/READY] stable Pantry trust + protected Windows code signer materialized'
 
-      - name: Run canonical local-and-hosted release entrypoint
+      - name: Compile Workspace, prepare Pantry, and publish Kura
         shell: pwsh
         env:
-          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets.KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM }}
-          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets.KYRON_CONTENT_PRIVATE_PEM }}
           KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
         run: |
           $ErrorActionPreference='Stop'
@@ -378,9 +351,9 @@ jobs:
             '-RunId','${{ github.run_id }}',
             '-RunAttempt','${{ github.run_attempt }}'
           )
-          if('${{ inputs.force_rebuild }}' -eq 'true'){$args+='-ForceRebuild'}
+          if('${{ inputs.force_rebuild }}'-eq'true'){$args+='-ForceRebuild'}
           & $batch @args
-          if($LASTEXITCODE-ne0){throw "canonical Kura release transaction failed: $LASTEXITCODE"}
+          if($LASTEXITCODE-ne0){throw "canonical Workspace -> Pantry -> Kura transaction failed: $LASTEXITCODE"}
 
       - name: Verify remote Kura and private publication receipt
         shell: pwsh
@@ -388,38 +361,49 @@ jobs:
           $ErrorActionPreference='Stop'
           git -C core fetch --prune origin main
           if($LASTEXITCODE-ne0){throw 'Pantry Core fetch failed after publication'}
-          $core=(git -C core rev-parse refs/remotes/origin/main).Trim()
-          $kura=(git -C core rev-parse refs/remotes/origin/main:kura).Trim()
+          $core=(git -C core rev-parse refs/remotes/origin/main).Trim().ToLowerInvariant()
+          $kura=(git -C core rev-parse refs/remotes/origin/main:kura).Trim().ToLowerInvariant()
           $paths=@(git -C core ls-tree -r --name-only refs/remotes/origin/main -- kura)
           if(!$paths.Count){throw 'published Kura tree is empty'}
-          $bad=@($paths|Where-Object{$_ -notmatch '^kura/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{28}\.bin$'})
+          $bad=@($paths|Where-Object{$_-notmatch'^kura/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{28}\.bin$'})
           if($bad.Count){throw "non-opaque path escaped Kura publication: $($bad[0])"}
 
           git -C pantry fetch --prune origin main
           if($LASTEXITCODE-ne0){throw 'private Pantry main fetch failed'}
           git -C pantry fetch --force origin refs/tags/kyron-kura-published:refs/tags/kyron-kura-published
           if($LASTEXITCODE-ne0){throw 'private publication tag fetch failed'}
-          $pantry=(git -C pantry rev-parse refs/remotes/origin/main).Trim()
-          $target=(git -C pantry rev-list -n1 refs/tags/kyron-kura-published).Trim()
-          $message=(git -C pantry tag -l kyron-kura-published --format='%(contents)') -join "`n"
-          $tagSource=([regex]::Match($message,'(?m)^source=([0-9a-f]{40})$')).Groups[1].Value
-          $tagCore=([regex]::Match($message,'(?m)^core=([0-9a-f]{40})$')).Groups[1].Value
-          $tagKura=([regex]::Match($message,'(?m)^kura_tree=([0-9a-f]{40})$')).Groups[1].Value
+          $pantry=(git -C pantry rev-parse refs/remotes/origin/main).Trim().ToLowerInvariant()
+          $target=(git -C pantry rev-list -n1 refs/tags/kyron-kura-published).Trim().ToLowerInvariant()
+          $message=(git -C pantry tag -l kyron-kura-published --format='%(contents)')-join"`n"
+          $tagSource=([regex]::Match($message,'(?m)^source=([0-9a-f]{40})$')).Groups[1].Value.ToLowerInvariant()
+          $tagCore=([regex]::Match($message,'(?m)^core=([0-9a-f]{40})$')).Groups[1].Value.ToLowerInvariant()
+          $tagKura=([regex]::Match($message,'(?m)^kura_tree=([0-9a-f]{40})$')).Groups[1].Value.ToLowerInvariant()
           if($target-ne$pantry-or$tagSource-ne$pantry-or$tagCore-ne$core-or$tagKura-ne$kura){throw "publication tag mismatch pantry=$pantry target=$target core=$core tagCore=$tagCore kura=$kura tagKura=$tagKura"}
           Write-Host "[KURA][REMOTE/OK] pantry=$pantry core=$core kura=$kura records=$($paths.Count)"
+
+      - name: Run canonical Pantry Core consumer verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\workspace\TEST_PANTRY_CORE.bat -PantryPath (Join-Path $env:GITHUB_WORKSPACE 'pantry') -PantryCorePath (Join-Path $env:GITHUB_WORKSPACE 'core')
+          if($LASTEXITCODE-ne0){throw "canonical TEST_PANTRY_CORE failed: $LASTEXITCODE"}
 
       - name: Erase transient signing material
         if: ${{ always() }}
         shell: pwsh
         run: |
           $pfx=$env:KYRON_CODESIGN_PFX
-          if($pfx -and (Test-Path -LiteralPath $pfx -PathType Leaf)){
+          if($pfx-and(Test-Path -LiteralPath $pfx -PathType Leaf)){
             try{$length=(Get-Item -LiteralPath $pfx).Length;[IO.File]::WriteAllBytes($pfx,(New-Object byte[] $length))}catch{}
             Remove-Item -LiteralPath $pfx -Force -ErrorAction SilentlyContinue
           }
-          $thumb=($env:KYRON_CODESIGN_TEMP_TRUST -replace '[^0-9A-Fa-f]','')
-          if($thumb){
-            foreach($store in 'Cert:\CurrentUser\Root','Cert:\CurrentUser\TrustedPublisher'){
-              Get-ChildItem $store -ErrorAction SilentlyContinue | Where-Object Thumbprint -eq $thumb | Remove-Item -Force -ErrorAction SilentlyContinue
+          $signerRoot=$env:KYRON_ACTIONS_SIGNER_ROOT
+          if($signerRoot-and(Test-Path -LiteralPath $signerRoot -PathType Container)){
+            foreach($name in 'bootstrap_root_private.pem','content_private.pem'){
+              $path=Join-Path $signerRoot $name
+              if(Test-Path -LiteralPath $path -PathType Leaf){try{$length=(Get-Item $path).Length;[IO.File]::WriteAllBytes($path,(New-Object byte[] $length))}catch{}}
             }
+            Remove-Item -LiteralPath $signerRoot -Recurse -Force -ErrorAction SilentlyContinue
           }
+          $thumb=($env:KYRON_CODESIGN_TEMP_TRUST-replace'[^0-9A-Fa-f]','')
+          if($thumb){foreach($store in 'Cert:\CurrentUser\Root','Cert:\CurrentUser\TrustedPublisher'){Get-ChildItem $store -ErrorAction SilentlyContinue|Where-Object Thumbprint -eq $thumb|Remove-Item -Force -ErrorAction SilentlyContinue}}
