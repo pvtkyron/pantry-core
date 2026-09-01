@@ -3,7 +3,7 @@ name: Midnight Patisserie
 on:
   push:
     branches: [main]
-    paths: [.github/workflows/patisserie.yml, .github/kitchen.ps1]
+    paths: [.github/workflows/patisserie.yml]
   workflow_dispatch:
     inputs:
       fresh_batch:
@@ -30,19 +30,55 @@ jobs:
     outputs:
       fresh: ${{ steps.taste.outputs.fresh }}
     steps:
-      - name: Set table
-        id: taste
+      - name: Dust counter
         shell: pwsh
         env:
-          SHELF_KEY: ${{ github.token }}
           MIX: ${{ secrets.MIX_REPO }}
-          MIX_KEY: ${{ secrets[vars.MIX_KEY_NAME] }}
           FILL: ${{ secrets.FILL_REPO }}
-          FILL_KEY: ${{ secrets[vars.FILL_KEY_NAME] }}
         run: |
-          & git clone --quiet --branch main "https://github.com/$env:GITHUB_REPOSITORY.git" shelf *> $null
-          if($LASTEXITCODE){throw 'counter rejected'}
-          & ./shelf/.github/kitchen.ps1 -Mode Tray
+          Write-Host "::add-mask::$env:MIX"
+          Write-Host "::add-mask::$env:FILL"
+
+      - name: Open counter
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: shelf
+          fetch-depth: 0
+          persist-credentials: true
+          show-progress: false
+
+      - name: Measure flour
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          ref: main
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          path: mix
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: true
+          show-progress: false
+      - name: Whip cream
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.FILL_REPO }}
+          ref: main
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          path: filling
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: true
+          show-progress: false
+
+      - name: Taste tray
+        id: taste
+        shell: pwsh
+        run: |
+          & ./mix/Tools/Bake.ps1 `
+            -Fill (Join-Path $PWD.Path 'filling') `
+            -Shelf (Join-Path $PWD.Path 'shelf') `
+            -Peek
           exit $LASTEXITCODE
 
   oven:
@@ -54,14 +90,50 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Dust counter
+        shell: pwsh
+        env:
+          MIX: ${{ secrets.MIX_REPO }}
+          FILL: ${{ secrets.FILL_REPO }}
+        run: |
+          Write-Host "::add-mask::$env:MIX"
+          Write-Host "::add-mask::$env:FILL"
+
+      - name: Open counter
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: shelf
+          fetch-depth: 0
+          persist-credentials: true
+          show-progress: false
+
+      - name: Measure flour
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          ref: main
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          path: mix
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: true
+          show-progress: false
+      - name: Whip cream
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.FILL_REPO }}
+          ref: main
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          path: filling
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: true
+          show-progress: false
+
       - name: Bake
         shell: pwsh
         env:
-          SHELF_KEY: ${{ github.token }}
-          MIX: ${{ secrets.MIX_REPO }}
-          MIX_KEY: ${{ secrets[vars.MIX_KEY_NAME] }}
-          FILL: ${{ secrets.FILL_REPO }}
-          FILL_KEY: ${{ secrets[vars.FILL_KEY_NAME] }}
           CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
           CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
           JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
@@ -69,7 +141,13 @@ jobs:
           TIN: ${{ secrets[vars.TIN_NAME] }}
           PIN: ${{ secrets[vars.PIN_NAME] }}
         run: |
-          & git clone --quiet --branch main "https://github.com/$env:GITHUB_REPOSITORY.git" shelf *> $null
-          if($LASTEXITCODE){throw 'counter rejected'}
-          & .\shelf\.github\kitchen.ps1 -Mode Oven -Batch '${{ github.run_id }}' -Try '${{ github.run_attempt }}' -Fresh:$('${{ inputs.fresh_batch }}'-eq'true')
+          $a=@(
+            '-Fill',(Join-Path $PWD.Path 'filling'),
+            '-Shelf',(Join-Path $PWD.Path 'shelf'),
+            '-Batch','${{ github.run_id }}',
+            '-Try','${{ github.run_attempt }}'
+          )
+          if('${{ inputs.fresh_batch }}'-eq'true'){$a+='-Fresh'}
+          $ps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\mix\Tools\Bake.ps1 @a
           exit $LASTEXITCODE
