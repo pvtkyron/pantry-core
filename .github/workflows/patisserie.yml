@@ -3,7 +3,7 @@ name: Midnight Patisserie
 on:
   push:
     branches: [main]
-    paths: [.github/workflows/patisserie.yml]
+    paths: [.github/workflows/patisserie.yml, .github/kitchen.ps1]
   workflow_dispatch:
     inputs:
       fresh_batch:
@@ -40,18 +40,9 @@ jobs:
           FILL: ${{ secrets.FILL_REPO }}
           FILL_KEY: ${{ secrets[vars.FILL_KEY_NAME] }}
         run: |
-          $ErrorActionPreference='Stop';$env:GIT_TERMINAL_PROMPT='0'
-          function Pull($name,$repo,$key){
-            $pair=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$key"));$h="AUTHORIZATION: basic $pair";$u="https://github.com/$repo.git"
-            & git -c "http.https://github.com/.extraheader=$h" clone --quiet --branch main $u $name *> $null
-            if($LASTEXITCODE){throw 'tray rejected'}
-            & git -C $name config http.https://github.com/.extraheader $h
-            & git -C $name lfs pull *> $null;if($LASTEXITCODE){throw 'tray rejected'}
-          }
-          Pull 'shelf' $env:GITHUB_REPOSITORY $env:SHELF_KEY
-          Pull 'mix' $env:MIX $env:MIX_KEY
-          Pull 'filling' $env:FILL $env:FILL_KEY
-          & ./mix/Tools/Bake.ps1 -Fill (Join-Path $env:GITHUB_WORKSPACE 'filling') -Shelf (Join-Path $env:GITHUB_WORKSPACE 'shelf') -Peek
+          & git clone --quiet --branch main "https://github.com/$env:GITHUB_REPOSITORY.git" shelf *> $null
+          if($LASTEXITCODE){throw 'counter rejected'}
+          & ./shelf/.github/kitchen.ps1 -Mode Tray
           exit $LASTEXITCODE
 
   oven:
@@ -78,19 +69,7 @@ jobs:
           TIN: ${{ secrets[vars.TIN_NAME] }}
           PIN: ${{ secrets[vars.PIN_NAME] }}
         run: |
-          $ErrorActionPreference='Stop';$env:GIT_TERMINAL_PROMPT='0'
-          function Pull($name,$repo,$key){
-            $pair=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$key"));$h="AUTHORIZATION: basic $pair";$u="https://github.com/$repo.git"
-            & git -c "http.https://github.com/.extraheader=$h" clone --quiet --branch main $u $name *> $null
-            if($LASTEXITCODE){throw 'batch rejected'}
-            & git -C $name config http.https://github.com/.extraheader $h
-            & git -C $name lfs pull *> $null;if($LASTEXITCODE){throw 'batch rejected'}
-          }
-          Pull 'shelf' $env:GITHUB_REPOSITORY $env:SHELF_KEY
-          Pull 'mix' $env:MIX $env:MIX_KEY
-          Pull 'filling' $env:FILL $env:FILL_KEY
-          $a=@('-Fill',(Join-Path $env:GITHUB_WORKSPACE 'filling'),'-Shelf',(Join-Path $env:GITHUB_WORKSPACE 'shelf'),'-Batch','${{ github.run_id }}','-Try','${{ github.run_attempt }}')
-          if('${{ inputs.fresh_batch }}'-eq'true'){$a+='-Fresh'}
-          $ps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-          & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\mix\Tools\Bake.ps1 @a
+          & git clone --quiet --branch main "https://github.com/$env:GITHUB_REPOSITORY.git" shelf *> $null
+          if($LASTEXITCODE){throw 'counter rejected'}
+          & .\shelf\.github\kitchen.ps1 -Mode Oven -Batch '${{ github.run_id }}' -Try '${{ github.run_attempt }}' -Fresh:$('${{ inputs.fresh_batch }}'-eq'true')
           exit $LASTEXITCODE
