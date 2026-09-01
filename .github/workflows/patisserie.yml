@@ -29,6 +29,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       fresh: ${{ steps.taste.outputs.fresh }}
+      cream: ${{ steps.taste.outputs.cream }}
     steps:
       - name: Dust counter
         shell: pwsh
@@ -38,6 +39,9 @@ jobs:
         run: |
           Write-Host "::add-mask::$env:MIX"
           Write-Host "::add-mask::$env:FILL"
+          $crumb=$env:GITHUB_REPOSITORY -split '/',2
+          Write-Host "::add-mask::$env:GITHUB_REPOSITORY"
+          if($crumb.Count-eq2){Write-Host "::add-mask::$($crumb[0])";Write-Host "::add-mask::$($crumb[1])"}
 
       - name: Open counter
         uses: actions/checkout@v6
@@ -84,7 +88,7 @@ jobs:
     needs: tray
     if: ${{ needs.tray.outputs.fresh == 'true' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.fresh_batch) }}
     runs-on: windows-2025
-    timeout-minutes: 360
+    timeout-minutes: 60
     permissions:
       contents: write
     steps:
@@ -96,6 +100,9 @@ jobs:
         run: |
           Write-Host "::add-mask::$env:MIX"
           Write-Host "::add-mask::$env:FILL"
+          $crumb=$env:GITHUB_REPOSITORY -split '/',2
+          Write-Host "::add-mask::$env:GITHUB_REPOSITORY"
+          if($crumb.Count-eq2){Write-Host "::add-mask::$($crumb[0])";Write-Host "::add-mask::$($crumb[1])"}
 
       - name: Open counter
         uses: actions/checkout@v6
@@ -127,11 +134,20 @@ jobs:
           persist-credentials: true
           show-progress: false
 
-      - name: Warm oven
+      - name: Chill cream
+        id: cream_cache
+        if: ${{ needs.tray.outputs.cream != 'still' || (github.event_name == 'workflow_dispatch' && inputs.fresh_batch) }}
         uses: actions/cache@v4
         with:
-          path: oven
-          key: oven-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}
+          path: oven/cream
+          key: cream-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}
+
+      - name: Sift flour
+        id: flour_cache
+        uses: actions/cache@v4
+        with:
+          path: oven/flour
+          key: flour-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json', 'mix/**/requirements*.txt') }}
 
       - name: Bake
         shell: pwsh
@@ -143,6 +159,7 @@ jobs:
           TIN: ${{ secrets[vars.TIN_NAME] }}
           PIN: ${{ secrets[vars.PIN_NAME] }}
           OVEN_ROOT: oven
+          BAKERY_HOSTED: 1
         run: |
           $a=@(
             '-Fill',(Join-Path $PWD.Path 'filling'),
