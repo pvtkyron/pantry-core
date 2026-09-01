@@ -17,21 +17,28 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 25
     steps:
-      - name: Set table
+      - name: Dust counter
         shell: pwsh
-        env:
-          MIX: ${{ secrets.MIX_REPO }}
-          MIX_KEY: ${{ secrets[vars.MIX_KEY_NAME] }}
-          FILL: ${{ secrets.FILL_REPO }}
-          FILL_KEY: ${{ secrets[vars.FILL_KEY_NAME] }}
         run: |
-          $u="https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA/.github/table.ps1"
-          $p=Join-Path $env:RUNNER_TEMP 'table.ps1'
-          $ErrorActionPreference='Stop'
-          Invoke-WebRequest -Uri $u -OutFile $p -UseBasicParsing -TimeoutSec 20
-          & $p
-          exit $LASTEXITCODE
-
+          Write-Host "::add-mask::$env:GITHUB_REPOSITORY"
+          $crumb=$env:GITHUB_REPOSITORY -split '/',2
+          foreach($x in $crumb){if($x){Write-Host "::add-mask::$x"}}
+      - name: Open recipe
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: .github/actions/table
+      - name: Set table
+        uses: ./recipe/.github/actions/table
+        with:
+          mix: ${{ secrets.MIX_REPO }}
+          mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          fill: ${{ secrets.FILL_REPO }}
+          fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
       - name: Chill oven
         uses: actions/cache@v4
         with:

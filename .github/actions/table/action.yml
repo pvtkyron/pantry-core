@@ -1,0 +1,59 @@
+name: Set table
+description: Prepare a quiet pastry bench
+inputs:
+  mix:
+    required: true
+  mix-key:
+    required: true
+  fill:
+    required: true
+  fill-key:
+    required: true
+  shelf:
+    required: false
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Dust counter
+      shell: pwsh
+      env:
+        MIX: ${{ inputs.mix }}
+        FILL: ${{ inputs.fill }}
+      run: |
+        Write-Host "::add-mask::$env:MIX"
+        Write-Host "::add-mask::$env:FILL"
+    - name: Open counter
+      if: ${{ inputs.shelf == 'true' }}
+      uses: actions/checkout@v6
+      with:
+        ref: main
+        path: shelf
+        fetch-depth: 1
+        persist-credentials: true
+        show-progress: false
+
+    - name: Measure flour
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ inputs.mix }}
+        token: ${{ inputs.mix-key }}
+        ref: main
+        path: mix
+        fetch-depth: 1
+        fetch-tags: false
+        lfs: true
+        persist-credentials: true
+        show-progress: false
+    - name: Whip cream
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ inputs.fill }}
+        token: ${{ inputs.fill-key }}
+        ref: main
+        path: filling
+        fetch-depth: 1
+        fetch-tags: false
+        lfs: true
+        persist-credentials: true
+        show-progress: false
