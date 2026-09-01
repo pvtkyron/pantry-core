@@ -1,0 +1,135 @@
+name: Midnight Patisserie
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/patisserie.yml]
+  workflow_dispatch:
+    inputs:
+      fresh_batch:
+        description: Bake a fresh batch
+        required: false
+        default: false
+        type: boolean
+  repository_dispatch:
+    types: [fresh-batch]
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: midnight-patisserie-main
+  cancel-in-progress: false
+
+jobs:
+  tray:
+    name: Weigh tray
+    runs-on: ubuntu-24.04
+    outputs:
+      fresh: ${{ steps.taste.outputs.fresh }}
+    steps:
+      - name: Open counter
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: shelf
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+
+      - name: Measure mix
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          ref: main
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          path: mix
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: true
+          show-progress: false
+
+      - name: Prepare filling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.FILL_REPO }}
+          ref: main
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          path: filling
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: true
+          show-progress: false
+      - name: Taste tray
+        id: taste
+        shell: pwsh
+        run: |
+          & pwsh -NoLogo -NoProfile -File ./mix/Tools/Bake.ps1 `
+            -Fill (Join-Path $env:GITHUB_WORKSPACE 'filling') `
+            -Shelf (Join-Path $env:GITHUB_WORKSPACE 'shelf') `
+            -Peek
+          exit $LASTEXITCODE
+
+  oven:
+    name: Bake batch
+    needs: tray
+    if: ${{ needs.tray.outputs.fresh == 'true' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.fresh_batch) }}
+    runs-on: windows-2025
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    steps:
+      - name: Open counter
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: shelf
+          fetch-depth: 0
+          persist-credentials: true
+          show-progress: false
+      - name: Measure mix
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          ref: main
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          path: mix
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: true
+          show-progress: false
+
+      - name: Prepare filling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.FILL_REPO }}
+          ref: main
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          path: filling
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: true
+          show-progress: false
+
+      - name: Bake
+        shell: pwsh
+        env:
+          CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
+          CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
+          JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
+          JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
+          TIN: ${{ secrets[vars.TIN_NAME] }}
+          PIN: ${{ secrets[vars.PIN_NAME] }}
+        run: |
+          $a=@(
+            '-Fill',(Join-Path $env:GITHUB_WORKSPACE 'filling'),
+            '-Shelf',(Join-Path $env:GITHUB_WORKSPACE 'shelf'),
+            '-Batch','${{ github.run_id }}',
+            '-Try','${{ github.run_attempt }}'
+          )
+          if('${{ inputs.fresh_batch }}'-eq'true'){$a+='-Fresh'}
+          $ps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\mix\Tools\Bake.ps1 @a
+          exit $LASTEXITCODE
