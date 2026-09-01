@@ -78,7 +78,8 @@ jobs:
             if [[ -n "$state" ]]; then
               count="$(printf '%s\n' "$state" | wc -l | tr -d ' ')"
               kinds="$(printf '%s\n' "$state" | cut -c1-2 | sort -u | tr '\n' ',' | sed 's/,$//')"
-              echo "::error::checkout invariant failed repo=$repo dirty=$count kinds=$kinds"
+              state_hash="$(printf '%s' "$state" | sha256sum | cut -d' ' -f1)"
+              echo "::error::checkout invariant failed repo=$repo dirty=$count kinds=$kinds state_hash=$state_hash"
               exit 6
             fi
           done
