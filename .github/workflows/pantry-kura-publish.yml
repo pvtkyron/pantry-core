@@ -215,7 +215,13 @@ jobs:
             if(!$eku){throw 'release certificate is not valid for code signing'}
             if($cert.Subject-eq$cert.Issuer){
               $cer=Join-Path $env:RUNNER_TEMP 'kyron-codesign.cer';[IO.File]::WriteAllBytes($cer,$cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
-              Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\Root|Out-Null;Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\TrustedPublisher|Out-Null
+              $kit=Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+              $certmgr=Get-ChildItem -Path $kit -Directory -ErrorAction SilentlyContinue|Sort-Object Name -Descending|ForEach-Object{Join-Path $_.FullName 'x64\certmgr.exe'}|Where-Object{Test-Path -LiteralPath $_ -PathType Leaf}|Select-Object -First 1
+              if(!$certmgr){throw 'Windows SDK certificate tool is unavailable'}
+              foreach($store in 'Root','TrustedPublisher'){
+                & $certmgr /add $cer /s /r currentUser $store *> $null
+                if($LASTEXITCODE-ne0){throw 'transient code-signing trust installation failed'}
+              }
               "KYRON_CODESIGN_TEMP_TRUST=$($cert.Thumbprint)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append;Remove-Item $cer -Force
             }
           }finally{$cert.Dispose()}
