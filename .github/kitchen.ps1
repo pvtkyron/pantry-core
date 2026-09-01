@@ -13,9 +13,17 @@ function Need([string]$Name){$v=[Environment]::GetEnvironmentVariable($Name);if(
 function Header([string]$Key){$b=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$Key"));return "AUTHORIZATION: basic $b"}
 function Lock([string]$Root,[string]$Key){& git -C $Root config http.https://github.com/.extraheader (Header $Key);if($LASTEXITCODE){throw 'batch rejected'}}
 function Pull([string]$Name,[string]$Slug,[string]$Key){
-    $clean="https://github.com/$Slug.git";$auth="https://x-access-token:$Key@github.com/$Slug.git";$dst=Join-Path $Bench $Name
-    & git clone --quiet --branch main $auth $dst *> $null;if($LASTEXITCODE){throw 'batch rejected'}
-    & git -C $dst remote set-url origin $clean;if($LASTEXITCODE){throw 'batch rejected'}
+    $h=Header $Key;$u="https://github.com/$Slug.git";$dst=Join-Path $Bench $Name;$err=Join-Path ([IO.Path]::GetTempPath()) ('crumb-'+[Guid]::NewGuid().ToString('N')+'.txt')
+    try{
+        & git -c "http.https://github.com/.extraheader=$h" clone --quiet --branch main $u $dst 1>$null 2>$err
+        if($LASTEXITCODE){
+            $d=if(Test-Path $err){Get-Content -LiteralPath $err -Raw}else{''}
+            if($d-match'(?i)(authentication|permission denied|403|401|could not read username)'){$script:Station+='-key'}
+            elseif($d-match'(?i)(repository not found|not found)'){$script:Station+='-missing'}
+            elseif($d-match'(?i)(failed to connect|could not resolve|timed out|timeout)'){$script:Station+='-net'}else{$script:Station+='-pull'}
+            throw 'batch rejected'
+        }
+    }finally{Remove-Item -LiteralPath $err -Force -ErrorAction SilentlyContinue}
     Lock $dst $Key
 }
 $Station='counter'
