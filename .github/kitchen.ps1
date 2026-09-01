@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop';$env:GIT_TERMINAL_PROMPT='0'
 $Shelf=[IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $Bench=Split-Path -Parent $Shelf;$Mix=Join-Path $Bench 'mix';$Fill=Join-Path $Bench 'filling'
-function Need([string]$Name){$v=[Environment]::GetEnvironmentVariable($Name);if([string]::IsNullOrWhiteSpace($v)){throw 'ingredient unavailable'};return $v}
+function Need([string]$Name){$v=[Environment]::GetEnvironmentVariable($Name);if([string]::IsNullOrWhiteSpace($v)){throw 'ingredient unavailable'};return $v.Trim()}
 function Header([string]$Key){$b=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$Key"));return "AUTHORIZATION: basic $b"}
 function Lock([string]$Root,[string]$Key){& git -C $Root config http.https://github.com/.extraheader (Header $Key);if($LASTEXITCODE){throw 'batch rejected'}}
 function Pull([string]$Name,[string]$Slug,[string]$Key){
