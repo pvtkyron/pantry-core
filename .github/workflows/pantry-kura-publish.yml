@@ -196,8 +196,13 @@ jobs:
           foreach($pair in $files.GetEnumerator()){
             [IO.File]::WriteAllText((Join-Path $signerRoot $pair.Key),([Environment]::GetEnvironmentVariable($pair.Value).Trim()+"`n"),[Text.UTF8Encoding]::new($false))
           }
-          $identity=& .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $env:GITHUB_WORKSPACE 'private') -Workspace (Join-Path $env:GITHUB_WORKSPACE 'source') 6>$null
-          if(!$identity-or[string]$identity.Profile-ne'local-machine-v1'){throw 'Pantry signing identity validation failed'}
+          $winps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $winps -NoProfile -ExecutionPolicy Bypass -File .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $env:GITHUB_WORKSPACE 'private') -Workspace (Join-Path $env:GITHUB_WORKSPACE 'source') *> $null
+          if($LASTEXITCODE-ne0){throw 'Pantry signing identity initialization failed'}
+          $manifest=Join-Path $signerRoot 'identity.json'
+          if(!(Test-Path -LiteralPath $manifest -PathType Leaf)){throw 'Pantry signing identity manifest is missing'}
+          $identity=Get-Content -LiteralPath $manifest -Raw|ConvertFrom-Json
+          if([string]$identity.profile-ne'local-machine-v1'){throw 'Pantry signing identity validation failed'}
           "KYRON_ACTIONS_SIGNER_ROOT=$signerRoot" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           $pfx=Join-Path $env:RUNNER_TEMP 'kyron-codesign.pfx'
           [IO.File]::WriteAllBytes($pfx,[Convert]::FromBase64String($env:KYRON_CODESIGN_PFX_B64.Trim()))
