@@ -1,0 +1,96 @@
+name: Night Box
+
+on:
+  workflow_call:
+    inputs:
+      fold:
+        required: false
+        default: false
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      fold:
+        description: Fold fresh cream
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: night-box
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    name: Pack box
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Dust counter
+        shell: pwsh
+        env:
+          MIX: ${{ secrets.MIX_REPO }}
+          FILL: ${{ secrets.FILL_REPO }}
+        run: |
+          Write-Host "::add-mask::$env:MIX"
+          Write-Host "::add-mask::$env:FILL"
+          $crumb=$env:GITHUB_REPOSITORY -split '/',2
+          Write-Host "::add-mask::$env:GITHUB_REPOSITORY"
+          if($crumb.Count-eq2){Write-Host "::add-mask::$($crumb[0])";Write-Host "::add-mask::$($crumb[1])"}
+
+      - name: Open counter
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: shelf
+          fetch-depth: 1
+          persist-credentials: true
+          show-progress: false
+
+      - name: Measure flour
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: mix
+          fetch-depth: 1
+          show-progress: false
+
+      - name: Whisk filling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.FILL_REPO }}
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: main
+          path: filling
+          fetch-depth: 1
+          persist-credentials: true
+          show-progress: false
+
+      - name: Chill flour
+        uses: actions/cache@v4
+        with:
+          path: '*-sdk/Python'
+          key: flour-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}
+
+      - name: Pack
+        shell: pwsh
+        env:
+          CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
+          CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
+          JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
+          JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
+          TIN: ${{ secrets[vars.TIN_NAME] }}
+          PIN: ${{ secrets[vars.PIN_NAME] }}
+        run: |
+          $a=@(
+            '-Fill',(Join-Path $PWD.Path 'filling'),
+            '-Shelf',(Join-Path $PWD.Path 'shelf'),
+            '-Slice','Box','-Batch','${{ github.run_id }}','-Try','${{ github.run_attempt }}'
+          )
+          if('${{ inputs.fold }}'-eq'true'){$a+='-Fold'}
+          & ./mix/Tools/BakeSlice.ps1 @a
+          exit $LASTEXITCODE

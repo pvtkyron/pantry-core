@@ -1,0 +1,61 @@
+name: Velvet Cream
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: velvet-cream
+  cancel-in-progress: false
+
+jobs:
+  bake:
+    name: Whip cream
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Dust counter
+        shell: pwsh
+        env:
+          MIX: ${{ secrets.MIX_REPO }}
+          FILL: ${{ secrets.FILL_REPO }}
+        run: |
+          Write-Host "::add-mask::$env:MIX"
+          Write-Host "::add-mask::$env:FILL"
+
+      - name: Measure flour
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: mix
+          fetch-depth: 1
+          show-progress: false
+
+      - name: Whisk filling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.FILL_REPO }}
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: main
+          path: filling
+          fetch-depth: 1
+          persist-credentials: true
+          show-progress: false
+
+      - name: Bake
+        shell: pwsh
+        env:
+          CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
+          CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
+          JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
+          JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
+          TIN: ${{ secrets[vars.TIN_NAME] }}
+          PIN: ${{ secrets[vars.PIN_NAME] }}
+        run: |
+          & ./mix/Tools/BakeSlice.ps1 -Fill (Join-Path $PWD.Path 'filling') -Slice Cream
+          exit $LASTEXITCODE

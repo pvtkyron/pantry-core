@@ -3,18 +3,18 @@ name: Midnight Patisserie
 on:
   push:
     branches: [main]
-    paths: [.github/workflows/patisserie.yml]
+    paths: [.github/workflows/**]
   workflow_dispatch:
     inputs:
       fresh_batch:
-        description: Bake a fresh batch
+        description: Fresh batch
         required: false
         default: false
         type: boolean
   repository_dispatch:
     types: [fresh-batch]
   schedule:
-    - cron: '17 * * * *'
+    - cron: '*/5 * * * *'
 
 permissions:
   contents: read
@@ -28,8 +28,10 @@ jobs:
     name: Weigh tray
     runs-on: ubuntu-24.04
     outputs:
-      fresh: ${{ steps.taste.outputs.fresh }}
+      sponge: ${{ steps.taste.outputs.sponge }}
       cream: ${{ steps.taste.outputs.cream }}
+      cocoa: ${{ steps.taste.outputs.cocoa }}
+      box: ${{ steps.taste.outputs.box }}
     steps:
       - name: Dust counter
         shell: pwsh
@@ -39,135 +41,68 @@ jobs:
         run: |
           Write-Host "::add-mask::$env:MIX"
           Write-Host "::add-mask::$env:FILL"
-          $crumb=$env:GITHUB_REPOSITORY -split '/',2
-          Write-Host "::add-mask::$env:GITHUB_REPOSITORY"
-          if($crumb.Count-eq2){Write-Host "::add-mask::$($crumb[0])";Write-Host "::add-mask::$($crumb[1])"}
-
-      - name: Open counter
-        uses: actions/checkout@v6
-        with:
-          ref: main
-          path: shelf
-          fetch-depth: 1
-          persist-credentials: true
-          show-progress: false
 
       - name: Measure flour
         uses: actions/checkout@v6
         with:
           repository: ${{ secrets.MIX_REPO }}
-          ref: main
           token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
           path: mix
           fetch-depth: 1
-          persist-credentials: true
           show-progress: false
+
       - name: Whip cream
         uses: actions/checkout@v6
         with:
           repository: ${{ secrets.FILL_REPO }}
-          ref: main
           token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: main
           path: filling
           fetch-depth: 1
-          persist-credentials: true
           show-progress: false
 
       - name: Taste tray
         id: taste
         shell: pwsh
         run: |
-          & ./mix/Tools/Bake.ps1 `
-            -Fill (Join-Path $PWD.Path 'filling') `
-            -Shelf (Join-Path $PWD.Path 'shelf') `
-            -Peek
-          exit $LASTEXITCODE
-
-  oven:
-    name: Bake batch
-    needs: tray
-    if: ${{ needs.tray.outputs.fresh == 'true' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.fresh_batch) }}
-    runs-on: windows-2025
-    timeout-minutes: 60
-    permissions:
-      contents: write
-    steps:
-      - name: Dust counter
-        shell: pwsh
-        env:
-          MIX: ${{ secrets.MIX_REPO }}
-          FILL: ${{ secrets.FILL_REPO }}
-        run: |
-          Write-Host "::add-mask::$env:MIX"
-          Write-Host "::add-mask::$env:FILL"
-          $crumb=$env:GITHUB_REPOSITORY -split '/',2
-          Write-Host "::add-mask::$env:GITHUB_REPOSITORY"
-          if($crumb.Count-eq2){Write-Host "::add-mask::$($crumb[0])";Write-Host "::add-mask::$($crumb[1])"}
-
-      - name: Open counter
-        uses: actions/checkout@v6
-        with:
-          ref: main
-          path: shelf
-          fetch-depth: 1
-          persist-credentials: true
-          show-progress: false
-
-      - name: Measure flour
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ secrets.MIX_REPO }}
-          ref: main
-          token: ${{ secrets[vars.MIX_KEY_NAME] }}
-          path: mix
-          fetch-depth: 1
-          persist-credentials: true
-          show-progress: false
-      - name: Whip cream
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ secrets.FILL_REPO }}
-          ref: main
-          token: ${{ secrets[vars.FILL_KEY_NAME] }}
-          path: filling
-          fetch-depth: 1
-          persist-credentials: true
-          show-progress: false
-
-      - name: Chill cream
-        id: cream_cache
-        if: ${{ needs.tray.outputs.cream != 'still' || (github.event_name == 'workflow_dispatch' && inputs.fresh_batch) }}
-        uses: actions/cache@v4
-        with:
-          path: oven/cream
-          key: cream-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}
-
-      - name: Sift flour
-        id: flour_cache
-        uses: actions/cache@v4
-        with:
-          path: oven/flour
-          key: flour-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json', 'mix/**/requirements*.txt') }}
-
-      - name: Bake
-        shell: pwsh
-        env:
-          CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
-          CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
-          JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
-          JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
-          TIN: ${{ secrets[vars.TIN_NAME] }}
-          PIN: ${{ secrets[vars.PIN_NAME] }}
-          OVEN_ROOT: oven
-          BAKERY_HOSTED: 1
-        run: |
-          $a=@(
-            '-Fill',(Join-Path $PWD.Path 'filling'),
-            '-Shelf',(Join-Path $PWD.Path 'shelf'),
-            '-Batch','${{ github.run_id }}',
-            '-Try','${{ github.run_attempt }}'
-          )
+          $a=@('-Fill',(Join-Path $PWD.Path 'filling'),'-Slice','Probe')
           if('${{ inputs.fresh_batch }}'-eq'true'){$a+='-Fresh'}
-          $ps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-          & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\mix\Tools\Bake.ps1 @a
+          & ./mix/Tools/BakeSlice.ps1 @a
           exit $LASTEXITCODE
+
+  sponge:
+    name: Sponge
+    needs: tray
+    if: ${{ needs.tray.outputs.sponge == 'true' }}
+    uses: ./.github/workflows/sponge.yml
+    secrets: inherit
+
+  cream:
+    name: Cream
+    needs: tray
+    if: ${{ needs.tray.outputs.cream == 'true' }}
+    uses: ./.github/workflows/cream.yml
+    secrets: inherit
+
+  cocoa:
+    name: Cocoa
+    needs: [tray, cream]
+    if: ${{ always() && needs.tray.result == 'success' && needs.tray.outputs.cocoa == 'true' && (needs.cream.result == 'success' || needs.cream.result == 'skipped') }}
+    uses: ./.github/workflows/cocoa.yml
+    with:
+      fold: ${{ needs.tray.outputs.cream == 'true' }}
+    secrets: inherit
+
+  box:
+    name: Box
+    needs: [tray, sponge, cream, cocoa]
+    if: >-
+      ${{ always() && needs.tray.result == 'success' && needs.tray.outputs.box == 'true' &&
+          (needs.sponge.result == 'success' || needs.sponge.result == 'skipped') &&
+          (needs.cream.result == 'success' || needs.cream.result == 'skipped') &&
+          (needs.cocoa.result == 'success' || needs.cocoa.result == 'skipped') }}
+    uses: ./.github/workflows/box.yml
+    with:
+      fold: ${{ needs.tray.outputs.cream == 'true' && needs.tray.outputs.cocoa != 'true' }}
+    secrets: inherit

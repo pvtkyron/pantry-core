@@ -1,0 +1,80 @@
+name: Cocoa Shell
+
+on:
+  workflow_call:
+    inputs:
+      fold:
+        required: false
+        default: false
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      fold:
+        description: Fold fresh cream
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cocoa-shell
+  cancel-in-progress: false
+
+jobs:
+  bake:
+    name: Bake cocoa
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - name: Dust counter
+        shell: pwsh
+        env:
+          MIX: ${{ secrets.MIX_REPO }}
+          FILL: ${{ secrets.FILL_REPO }}
+        run: |
+          Write-Host "::add-mask::$env:MIX"
+          Write-Host "::add-mask::$env:FILL"
+
+      - name: Measure flour
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: mix
+          fetch-depth: 1
+          show-progress: false
+
+      - name: Whisk filling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.FILL_REPO }}
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: main
+          path: filling
+          fetch-depth: 1
+          persist-credentials: true
+          show-progress: false
+
+      - name: Chill cocoa
+        uses: actions/cache@v4
+        with:
+          path: '*-sdk/Android'
+          key: cocoa-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}
+
+      - name: Bake
+        shell: pwsh
+        env:
+          CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
+          CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
+          JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
+          JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
+          TIN: ${{ secrets[vars.TIN_NAME] }}
+          PIN: ${{ secrets[vars.PIN_NAME] }}
+        run: |
+          $a=@('-Fill',(Join-Path $PWD.Path 'filling'),'-Slice','Cocoa')
+          if('${{ inputs.fold }}'-eq'true'){$a+='-Fold'}
+          & ./mix/Tools/BakeSlice.ps1 @a
+          exit $LASTEXITCODE
