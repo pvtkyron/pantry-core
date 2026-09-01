@@ -74,7 +74,7 @@ jobs:
           TIN: ${{ secrets[vars.TIN_NAME] }}
           PIN: ${{ secrets[vars.PIN_NAME] }}
         run: |
-          $a=@('-Fill',(Join-Path $PWD.Path 'filling'),'-Slice','Cocoa')
-          if('${{ inputs.fold }}'-eq'true'){$a+='-Fold'}
+          $a=@{Fill=(Join-Path $PWD.Path 'filling');Slice='Cocoa'}
+          if('${{ inputs.fold }}'-eq'true'){$a.Fold=$true}
           & ./mix/Tools/BakeSlice.ps1 @a
           exit $LASTEXITCODE

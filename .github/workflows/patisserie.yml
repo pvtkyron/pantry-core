@@ -66,8 +66,8 @@ jobs:
         id: taste
         shell: pwsh
         run: |
-          $a=@('-Fill',(Join-Path $PWD.Path 'filling'),'-Slice','Probe')
-          if('${{ inputs.fresh_batch }}'-eq'true'){$a+='-Fresh'}
+          $a=@{Fill=(Join-Path $PWD.Path 'filling');Slice='Probe'}
+          if('${{ inputs.fresh_batch }}'-eq'true'){$a.Fresh=$true}
           & ./mix/Tools/BakeSlice.ps1 @a
           exit $LASTEXITCODE
 

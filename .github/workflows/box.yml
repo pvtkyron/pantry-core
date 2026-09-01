@@ -86,11 +86,14 @@ jobs:
           TIN: ${{ secrets[vars.TIN_NAME] }}
           PIN: ${{ secrets[vars.PIN_NAME] }}
         run: |
-          $a=@(
-            '-Fill',(Join-Path $PWD.Path 'filling'),
-            '-Shelf',(Join-Path $PWD.Path 'shelf'),
-            '-Slice','Box','-Batch','${{ github.run_id }}','-Try','${{ github.run_attempt }}'
-          )
+          $a=@{
+            Fill=(Join-Path $PWD.Path 'filling')
+            Shelf=(Join-Path $PWD.Path 'shelf')
+            Slice='Box'
+            Batch=[long]'${{ github.run_id }}'
+            Try=[int]'${{ github.run_attempt }}'
+          }
+          if('${{ inputs.fold }}'-eq'true'){$a.Fold=$true}
           if('${{ inputs.fold }}'-eq'true'){$a+='-Fold'}
           & ./mix/Tools/BakeSlice.ps1 @a
           exit $LASTEXITCODE
