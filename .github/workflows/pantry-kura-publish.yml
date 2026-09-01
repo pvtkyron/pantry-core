@@ -1,0 +1,267 @@
+name: Kura Release Hub
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pantry-kura-publish.yml
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: Rebuild private Windows and Android outputs
+        required: false
+        default: false
+        type: boolean
+  repository_dispatch:
+    types: [pantry-kura-publish, workspace-kura-publish]
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kura-release-hub-main
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Resolve private release state
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      needs_publish: ${{ steps.state.outputs.needs_publish }}
+      workspace_sha: ${{ steps.state.outputs.workspace_sha }}
+      core_sha: ${{ steps.state.outputs.core_sha }}
+    steps:
+      - name: Checkout public shell
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: site
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+
+      - name: Checkout private build source
+        uses: actions/checkout@v6
+        with:
+          repository: pvtkyron/Workspace
+          ref: main
+          token: ${{ secrets.KYRON_WORKSPACE_RO }}
+          path: source
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: false
+          show-progress: false
+
+      - name: Checkout private delivery source
+        uses: actions/checkout@v6
+        with:
+          repository: pvtkyron/pantry
+          ref: main
+          token: ${{ secrets.KYRON_PANTRY_RW }}
+          path: private
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: true
+          show-progress: false
+
+      - name: Resolve state without exporting private content
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          for repo in source private site; do
+            test -z "$(git -C "$repo" status --porcelain --untracked-files=normal)" || exit 6
+          done
+          test ! -e private/kura || exit 7
+          workspace_sha="$(git -C source rev-parse HEAD)"
+          pantry_sha="$(git -C private rev-parse HEAD)"
+          core_sha="$(git -C site rev-parse HEAD)"
+          core_kura="$(git -C site rev-parse HEAD:kura 2>/dev/null || true)"
+          provenance_workspace="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('private/release/delivery-provenance-v1.json')
+          try:v=json.loads(p.read_text(encoding='utf-8-sig')) if p.is_file() else {}
+          except Exception:v={}
+          print(str(v.get('workspace_sha','')).strip().lower())
+          PY
+          )"
+          tag_source=''; tag_core=''; tag_kura=''
+          if git -C private fetch --force origin refs/tags/kyron-kura-published:refs/tags/kyron-kura-published >/dev/null 2>&1; then
+            msg="$(git -C private tag -l kyron-kura-published --format='%(contents)' 2>/dev/null || true)"
+            tag_source="$(sed -n 's/^source=//p' <<<"$msg" | tail -n1)"
+            tag_core="$(sed -n 's/^core=//p' <<<"$msg" | tail -n1)"
+            tag_kura="$(sed -n 's/^kura_tree=//p' <<<"$msg" | tail -n1)"
+          fi
+          needs=true
+          if [[ "$provenance_workspace" == "$workspace_sha" && "$tag_source" == "$pantry_sha" && "$tag_core" == "$core_sha" && -n "$core_kura" && "$tag_kura" == "$core_kura" ]]; then needs=false; fi
+          echo "needs_publish=$needs" >> "$GITHUB_OUTPUT"
+          echo "workspace_sha=$workspace_sha" >> "$GITHUB_OUTPUT"
+          echo "core_sha=$core_sha" >> "$GITHUB_OUTPUT"
+          echo "[KURA][GATE] publish=$needs"
+
+  compiler:
+    name: Compile private Workspace and publish opaque Kura
+    needs: gate
+    if: ${{ needs.gate.outputs.needs_publish == 'true' || (github.event_name == 'workflow_dispatch' && inputs.force_rebuild) }}
+    runs-on: ${{ fromJSON(vars.KYRON_WINDOWS_RUNNER_JSON || '["windows-2025"]') }}
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    env:
+      KYRON_PANTRY_ROOT: ${{ github.workspace }}\private
+      KYRON_PANTRY_CORE_ROOT: ${{ github.workspace }}\site
+      KYRON_VS_BUILD: '1'
+      KYRON_NONINTERACTIVE: '1'
+      KYRON_CODESIGN_AUTOCREATE: '0'
+      ComSpec: C:\Windows\System32\cmd.exe
+    steps:
+      - name: Checkout public shell
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: site
+          fetch-depth: 0
+          persist-credentials: true
+          show-progress: false
+
+      - name: Checkout exact private Workspace main
+        uses: actions/checkout@v6
+        with:
+          repository: pvtkyron/Workspace
+          ref: main
+          token: ${{ secrets.KYRON_WORKSPACE_RO }}
+          path: source
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: true
+          show-progress: false
+
+      - name: Checkout private Pantry main
+        uses: actions/checkout@v6
+        with:
+          repository: pvtkyron/pantry
+          ref: main
+          token: ${{ secrets.KYRON_PANTRY_RW }}
+          path: private
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: true
+          show-progress: false
+
+      - name: Bind compiler to gated private revision
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $state=Join-Path $env:RUNNER_TEMP 'kyron-state'
+          New-Item -ItemType Directory -Force -Path $state|Out-Null
+          "KYRON_WORKSPACE_STATE_ROOT=$state" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "KYRON_WORKSPACE_DATA_ROOT=$state" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          $actual=(git -C source rev-parse HEAD).Trim().ToLowerInvariant()
+          $branch=(git -C source symbolic-ref --short HEAD).Trim()
+          if($branch-ne'main'-or$actual-ne'${{ needs.gate.outputs.workspace_sha }}'){throw 'private Workspace revision changed after gate'}
+          foreach($repo in 'source','private','site'){
+            $dirty=((git -C $repo status --porcelain --untracked-files=normal)-join"`n").Trim()
+            if($dirty){throw "release checkout is dirty: $repo"}
+          }
+          Write-Host '[KURA][BOUND] private source revision locked'
+
+      - name: Materialize transient signing identities
+        shell: pwsh
+        env:
+          KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+          KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+          KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+          KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
+          KYRON_CODESIGN_PFX_B64: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
+          KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $required='KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM','KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM','KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM','KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM','KYRON_CODESIGN_PFX_B64','KYRON_CODESIGN_PASSWORD'
+          foreach($name in $required){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))){throw 'required release identity is unavailable'}}
+          $signerRoot=Join-Path $env:KYRON_WORKSPACE_DATA_ROOT 'SigningKeys\PantryLocal\v1'
+          New-Item -ItemType Directory -Force -Path $signerRoot|Out-Null
+          $files=[ordered]@{'bootstrap_root_private.pem'='KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM';'bootstrap_root_public.pem'='KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM';'content_private.pem'='KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM';'content_public.pem'='KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM'}
+          foreach($pair in $files.GetEnumerator()){
+            [IO.File]::WriteAllText((Join-Path $signerRoot $pair.Key),([Environment]::GetEnvironmentVariable($pair.Value).Trim()+"`n"),[Text.UTF8Encoding]::new($false))
+          }
+          $identity=& .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $env:GITHUB_WORKSPACE 'private') -Workspace (Join-Path $env:GITHUB_WORKSPACE 'source') 6>$null
+          if(!$identity-or[string]$identity.Profile-ne'local-machine-v1'){throw 'Pantry signing identity validation failed'}
+          "KYRON_ACTIONS_SIGNER_ROOT=$signerRoot" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          $pfx=Join-Path $env:RUNNER_TEMP 'kyron-codesign.pfx'
+          [IO.File]::WriteAllBytes($pfx,[Convert]::FromBase64String($env:KYRON_CODESIGN_PFX_B64.Trim()))
+          $flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+          $cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$env:KYRON_CODESIGN_PASSWORD,$flags)
+          try{
+            if(!$cert.HasPrivateKey){throw 'release certificate has no private key'}
+            $eku=$false
+            foreach($ext in $cert.Extensions){if($ext -is [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]){foreach($oid in $ext.EnhancedKeyUsages){if($oid.Value-eq'1.3.6.1.5.5.7.3.3'){$eku=$true}}}}
+            if(!$eku){throw 'release certificate is not valid for code signing'}
+            if($cert.Subject-eq$cert.Issuer){
+              $cer=Join-Path $env:RUNNER_TEMP 'kyron-codesign.cer';[IO.File]::WriteAllBytes($cer,$cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+              Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\Root|Out-Null;Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\TrustedPublisher|Out-Null
+              "KYRON_CODESIGN_TEMP_TRUST=$($cert.Thumbprint)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append;Remove-Item $cer -Force
+            }
+          }finally{$cert.Dispose()}
+          "KYRON_CODESIGN_PFX=$pfx" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host '[KURA][SIGNING] transient identities ready'
+
+      - name: Compile Workspace, stage Pantry, prepare and publish Kura
+        shell: pwsh
+        env:
+          KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP ("kyron-private-release-"+[Guid]::NewGuid().ToString('N')+'.log')
+          "KYRON_PRIVATE_RELEASE_LOG=$log" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          $batch=Join-Path $env:GITHUB_WORKSPACE 'source\BUILD_AND_PUBLISH_PANTRY_CORE.bat'
+          $args=@('-PantryPath',(Join-Path $env:GITHUB_WORKSPACE 'private'),'-PantryCorePath',(Join-Path $env:GITHUB_WORKSPACE 'site'),'-RunId','${{ github.run_id }}','-RunAttempt','${{ github.run_attempt }}')
+          if('${{ inputs.force_rebuild }}'-eq'true'){$args+='-ForceRebuild'}
+          & $batch @args *> $log
+          $code=$LASTEXITCODE
+          if($code-ne0){$trace=if(Test-Path $log){(Get-FileHash $log -Algorithm SHA256).Hash.ToLowerInvariant()}else{'unavailable'};throw "private release transaction failed exit=$code trace=$trace"}
+          & .\source\TEST_PANTRY_CORE.bat -PantryPath (Join-Path $env:GITHUB_WORKSPACE 'private') -PantryCorePath (Join-Path $env:GITHUB_WORKSPACE 'site') *>> $log
+          if($LASTEXITCODE-ne0){$trace=(Get-FileHash $log -Algorithm SHA256).Hash.ToLowerInvariant();throw "private consumer verification failed trace=$trace"}
+          Write-Host '[KURA][BUILD] Bootstrap + Launcher + dual-ABI runtime staged privately; opaque Kura published'
+
+      - name: Prove public egress is Kura-only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git -C site fetch --prune origin main 2>$null|Out-Null
+          $final=(git -C site rev-parse refs/remotes/origin/main).Trim().ToLowerInvariant()
+          $paths=@(git -C site ls-tree -r --name-only refs/remotes/origin/main -- kura)
+          if(!$paths.Count){throw 'public Kura tree is empty'}
+          $bad=@($paths|Where-Object{$_-notmatch'^kura/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{28}\.bin$'})
+          if($bad.Count){throw 'non-opaque path escaped public Kura'}
+          $subject=((git -C site show -s --format=%s $final)-join'').Trim()
+          if($subject-like'kura: publish Pantry *'){
+            $delta=@(git -C site diff-tree --no-commit-id --name-only -r $final|Where-Object{$_})
+            if(@($delta|Where-Object{$_-notmatch'^kura/'}).Count){throw 'publication commit touched a non-Kura path'}
+          }
+          git -C private fetch --prune origin main 2>$null|Out-Null
+          git -C private fetch --force origin refs/tags/kyron-kura-published:refs/tags/kyron-kura-published 2>$null|Out-Null
+          $pantry=(git -C private rev-parse refs/remotes/origin/main).Trim().ToLowerInvariant()
+          $target=(git -C private rev-list -n1 refs/tags/kyron-kura-published).Trim().ToLowerInvariant()
+          $msg=(git -C private tag -l kyron-kura-published --format='%(contents)')-join"`n"
+          $tagSource=([regex]::Match($msg,'(?m)^source=([0-9a-f]{40})$')).Groups[1].Value.ToLowerInvariant()
+          $tagCore=([regex]::Match($msg,'(?m)^core=([0-9a-f]{40})$')).Groups[1].Value.ToLowerInvariant()
+          $tagKura=([regex]::Match($msg,'(?m)^kura_tree=([0-9a-f]{40})$')).Groups[1].Value.ToLowerInvariant()
+          $kura=(git -C site rev-parse refs/remotes/origin/main:kura).Trim().ToLowerInvariant()
+          if($target-ne$pantry-or$tagSource-ne$pantry-or$tagCore-ne$final-or$tagKura-ne$kura){throw 'private publication receipt does not match public Kura'}
+          Write-Host "[KURA][PUBLIC/OK] records=$($paths.Count) opaque=true"
+
+      - name: Erase transient private material
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          foreach($path in @($env:KYRON_PRIVATE_RELEASE_LOG,$env:KYRON_CODESIGN_PFX)){
+            if($path-and(Test-Path -LiteralPath $path -PathType Leaf)){Clear-Content -LiteralPath $path -Force -ErrorAction SilentlyContinue;Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue}
+          }
+          if($env:KYRON_ACTIONS_SIGNER_ROOT-and(Test-Path -LiteralPath $env:KYRON_ACTIONS_SIGNER_ROOT)){Remove-Item -LiteralPath $env:KYRON_ACTIONS_SIGNER_ROOT -Recurse -Force -ErrorAction SilentlyContinue}
+          $thumb=($env:KYRON_CODESIGN_TEMP_TRUST-replace'[^0-9A-Fa-f]','')
+          if($thumb){foreach($store in 'Cert:\CurrentUser\Root','Cert:\CurrentUser\TrustedPublisher'){Get-ChildItem $store -ErrorAction SilentlyContinue|Where-Object Thumbprint -eq $thumb|Remove-Item -Force -ErrorAction SilentlyContinue}}
