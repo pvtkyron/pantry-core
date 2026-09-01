@@ -74,7 +74,13 @@ jobs:
         run: |
           set -euo pipefail
           for repo in source private site; do
-            test -z "$(git -C "$repo" status --porcelain --untracked-files=normal)" || exit 6
+            state="$(git -C "$repo" status --porcelain --untracked-files=normal)"
+            if [[ -n "$state" ]]; then
+              count="$(printf '%s\n' "$state" | wc -l | tr -d ' ')"
+              kinds="$(printf '%s\n' "$state" | cut -c1-2 | sort -u | tr '\n' ',' | sed 's/,$//')"
+              echo "::error::checkout invariant failed repo=$repo dirty=$count kinds=$kinds"
+              exit 6
+            fi
           done
           test ! -e private/kura || exit 7
           workspace_sha="$(git -C source rev-parse HEAD)"
