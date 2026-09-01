@@ -102,6 +102,8 @@ jobs:
           (needs.sponge.result == 'success' || needs.sponge.result == 'skipped') &&
           (needs.cream.result == 'success' || needs.cream.result == 'skipped') &&
           (needs.cocoa.result == 'success' || needs.cocoa.result == 'skipped') }}
+    permissions:
+      contents: write
     uses: ./.github/workflows/box.yml
     with:
       fold: ${{ needs.tray.outputs.cream == 'true' && needs.tray.outputs.cocoa != 'true' }}
