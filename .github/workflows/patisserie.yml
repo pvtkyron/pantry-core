@@ -44,7 +44,7 @@ jobs:
         with:
           ref: main
           path: shelf
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: true
           show-progress: false
 
@@ -55,8 +55,7 @@ jobs:
           ref: main
           token: ${{ secrets[vars.MIX_KEY_NAME] }}
           path: mix
-          fetch-depth: 0
-          lfs: true
+          fetch-depth: 1
           persist-credentials: true
           show-progress: false
       - name: Whip cream
@@ -66,8 +65,7 @@ jobs:
           ref: main
           token: ${{ secrets[vars.FILL_KEY_NAME] }}
           path: filling
-          fetch-depth: 0
-          lfs: true
+          fetch-depth: 1
           persist-credentials: true
           show-progress: false
 
@@ -104,7 +102,7 @@ jobs:
         with:
           ref: main
           path: shelf
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: true
           show-progress: false
 
@@ -115,8 +113,7 @@ jobs:
           ref: main
           token: ${{ secrets[vars.MIX_KEY_NAME] }}
           path: mix
-          fetch-depth: 0
-          lfs: true
+          fetch-depth: 1
           persist-credentials: true
           show-progress: false
       - name: Whip cream
@@ -126,10 +123,15 @@ jobs:
           ref: main
           token: ${{ secrets[vars.FILL_KEY_NAME] }}
           path: filling
-          fetch-depth: 0
-          lfs: true
+          fetch-depth: 1
           persist-credentials: true
           show-progress: false
+
+      - name: Warm oven
+        uses: actions/cache@v4
+        with:
+          path: oven
+          key: oven-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}
 
       - name: Bake
         shell: pwsh
@@ -140,6 +142,7 @@ jobs:
           JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
           TIN: ${{ secrets[vars.TIN_NAME] }}
           PIN: ${{ secrets[vars.PIN_NAME] }}
+          OVEN_ROOT: oven
         run: |
           $a=@(
             '-Fill',(Join-Path $PWD.Path 'filling'),
