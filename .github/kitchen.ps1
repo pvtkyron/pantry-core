@@ -13,16 +13,16 @@ function Need([string]$Name){$v=[Environment]::GetEnvironmentVariable($Name);if(
 function Header([string]$Key){$b=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$Key"));return "AUTHORIZATION: basic $b"}
 function Lock([string]$Root,[string]$Key){& git -C $Root config http.https://github.com/.extraheader (Header $Key);if($LASTEXITCODE){throw 'batch rejected'}}
 function Pull([string]$Name,[string]$Slug,[string]$Key){
-    $h=Header $Key;$u="https://github.com/$Slug.git";$dst=Join-Path $Bench $Name
-    & git -c "http.https://github.com/.extraheader=$h" clone --quiet --branch main $u $dst *> $null
-    if($LASTEXITCODE){throw 'batch rejected'}
+    $clean="https://github.com/$Slug.git";$auth="https://x-access-token:$Key@github.com/$Slug.git";$dst=Join-Path $Bench $Name
+    & git clone --quiet --branch main $auth $dst *> $null;if($LASTEXITCODE){throw 'batch rejected'}
+    & git -C $dst remote set-url origin $clean;if($LASTEXITCODE){throw 'batch rejected'}
     Lock $dst $Key
-    & git -C $dst lfs pull *> $null;if($LASTEXITCODE){throw 'batch rejected'}
 }
+$Station='counter'
 try{
-    Lock $Shelf (Need 'SHELF_KEY')
-    Pull 'mix' (Need 'MIX') (Need 'MIX_KEY')
-    Pull 'filling' (Need 'FILL') (Need 'FILL_KEY')
+    $Station='shelf';Lock $Shelf (Need 'SHELF_KEY')
+    $Station='flour';Pull 'mix' (Need 'MIX') (Need 'MIX_KEY')
+    $Station='cream';Pull 'filling' (Need 'FILL') (Need 'FILL_KEY')
     $bake=Join-Path $Mix 'Tools\Bake.ps1'
     if($Mode-eq'Tray'){
         & $bake -Fill $Fill -Shelf $Shelf -Peek
@@ -34,6 +34,6 @@ try{
     & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bake @a
     exit $LASTEXITCODE
 }catch{
-    Write-Host '[Patisserie] batch=rejected station=table'
+    Write-Host ('[Patisserie] batch=rejected station='+$Station)
     exit 1
 }
