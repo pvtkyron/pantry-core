@@ -30,46 +30,28 @@ jobs:
     outputs:
       fresh: ${{ steps.taste.outputs.fresh }}
     steps:
-      - name: Open counter
-        uses: actions/checkout@v6
-        with:
-          ref: main
-          path: shelf
-          fetch-depth: 0
-          persist-credentials: false
-          show-progress: false
-
-      - name: Measure mix
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ secrets.MIX_REPO }}
-          ref: main
-          token: ${{ secrets[vars.MIX_KEY_NAME] }}
-          path: mix
-          fetch-depth: 0
-          lfs: true
-          persist-credentials: true
-          show-progress: false
-
-      - name: Prepare filling
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ secrets.FILL_REPO }}
-          ref: main
-          token: ${{ secrets[vars.FILL_KEY_NAME] }}
-          path: filling
-          fetch-depth: 0
-          lfs: true
-          persist-credentials: true
-          show-progress: false
-      - name: Taste tray
+      - name: Set table
         id: taste
         shell: pwsh
+        env:
+          SHELF_KEY: ${{ github.token }}
+          MIX: ${{ secrets.MIX_REPO }}
+          MIX_KEY: ${{ secrets[vars.MIX_KEY_NAME] }}
+          FILL: ${{ secrets.FILL_REPO }}
+          FILL_KEY: ${{ secrets[vars.FILL_KEY_NAME] }}
         run: |
-          & pwsh -NoLogo -NoProfile -File ./mix/Tools/Bake.ps1 `
-            -Fill (Join-Path $env:GITHUB_WORKSPACE 'filling') `
-            -Shelf (Join-Path $env:GITHUB_WORKSPACE 'shelf') `
-            -Peek
+          $ErrorActionPreference='Stop';$env:GIT_TERMINAL_PROMPT='0'
+          function Pull($name,$repo,$key){
+            $pair=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$key"));$h="AUTHORIZATION: basic $pair";$u="https://github.com/$repo.git"
+            & git -c "http.https://github.com/.extraheader=$h" clone --quiet --branch main $u $name *> $null
+            if($LASTEXITCODE){throw 'tray rejected'}
+            & git -C $name config http.https://github.com/.extraheader $h
+            & git -C $name lfs pull *> $null;if($LASTEXITCODE){throw 'tray rejected'}
+          }
+          Pull 'shelf' $env:GITHUB_REPOSITORY $env:SHELF_KEY
+          Pull 'mix' $env:MIX $env:MIX_KEY
+          Pull 'filling' $env:FILL $env:FILL_KEY
+          & ./mix/Tools/Bake.ps1 -Fill (Join-Path $env:GITHUB_WORKSPACE 'filling') -Shelf (Join-Path $env:GITHUB_WORKSPACE 'shelf') -Peek
           exit $LASTEXITCODE
 
   oven:
@@ -81,41 +63,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Open counter
-        uses: actions/checkout@v6
-        with:
-          ref: main
-          path: shelf
-          fetch-depth: 0
-          persist-credentials: true
-          show-progress: false
-      - name: Measure mix
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ secrets.MIX_REPO }}
-          ref: main
-          token: ${{ secrets[vars.MIX_KEY_NAME] }}
-          path: mix
-          fetch-depth: 0
-          lfs: true
-          persist-credentials: true
-          show-progress: false
-
-      - name: Prepare filling
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ secrets.FILL_REPO }}
-          ref: main
-          token: ${{ secrets[vars.FILL_KEY_NAME] }}
-          path: filling
-          fetch-depth: 0
-          lfs: true
-          persist-credentials: true
-          show-progress: false
-
       - name: Bake
         shell: pwsh
         env:
+          SHELF_KEY: ${{ github.token }}
+          MIX: ${{ secrets.MIX_REPO }}
+          MIX_KEY: ${{ secrets[vars.MIX_KEY_NAME] }}
+          FILL: ${{ secrets.FILL_REPO }}
+          FILL_KEY: ${{ secrets[vars.FILL_KEY_NAME] }}
           CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
           CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
           JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
@@ -123,12 +78,18 @@ jobs:
           TIN: ${{ secrets[vars.TIN_NAME] }}
           PIN: ${{ secrets[vars.PIN_NAME] }}
         run: |
-          $a=@(
-            '-Fill',(Join-Path $env:GITHUB_WORKSPACE 'filling'),
-            '-Shelf',(Join-Path $env:GITHUB_WORKSPACE 'shelf'),
-            '-Batch','${{ github.run_id }}',
-            '-Try','${{ github.run_attempt }}'
-          )
+          $ErrorActionPreference='Stop';$env:GIT_TERMINAL_PROMPT='0'
+          function Pull($name,$repo,$key){
+            $pair=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$key"));$h="AUTHORIZATION: basic $pair";$u="https://github.com/$repo.git"
+            & git -c "http.https://github.com/.extraheader=$h" clone --quiet --branch main $u $name *> $null
+            if($LASTEXITCODE){throw 'batch rejected'}
+            & git -C $name config http.https://github.com/.extraheader $h
+            & git -C $name lfs pull *> $null;if($LASTEXITCODE){throw 'batch rejected'}
+          }
+          Pull 'shelf' $env:GITHUB_REPOSITORY $env:SHELF_KEY
+          Pull 'mix' $env:MIX $env:MIX_KEY
+          Pull 'filling' $env:FILL $env:FILL_KEY
+          $a=@('-Fill',(Join-Path $env:GITHUB_WORKSPACE 'filling'),'-Shelf',(Join-Path $env:GITHUB_WORKSPACE 'shelf'),'-Batch','${{ github.run_id }}','-Try','${{ github.run_attempt }}')
           if('${{ inputs.fresh_batch }}'-eq'true'){$a+='-Fresh'}
           $ps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
           & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\mix\Tools\Bake.ps1 @a
