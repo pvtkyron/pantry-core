@@ -28,47 +28,22 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
-      - name: Dust counter
+      - name: Set table
         shell: pwsh
         env:
+          SHELF: ${{ github.repository }}
+          SHELF_KEY: ${{ github.token }}
           MIX: ${{ secrets.MIX_REPO }}
+          MIX_KEY: ${{ secrets[vars.MIX_KEY_NAME] }}
           FILL: ${{ secrets.FILL_REPO }}
+          FILL_KEY: ${{ secrets[vars.FILL_KEY_NAME] }}
         run: |
-          Write-Host "::add-mask::$env:MIX"
-          Write-Host "::add-mask::$env:FILL"
-          $crumb=$env:GITHUB_REPOSITORY -split '/',2
-          Write-Host "::add-mask::$env:GITHUB_REPOSITORY"
-          if($crumb.Count-eq2){Write-Host "::add-mask::$($crumb[0])";Write-Host "::add-mask::$($crumb[1])"}
-
-      - name: Open counter
-        uses: actions/checkout@v6
-        with:
-          ref: main
-          path: shelf
-          fetch-depth: 1
-          persist-credentials: true
-          show-progress: false
-
-      - name: Measure flour
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ secrets.MIX_REPO }}
-          token: ${{ secrets[vars.MIX_KEY_NAME] }}
-          ref: main
-          path: mix
-          fetch-depth: 1
-          show-progress: false
-
-      - name: Whisk filling
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ secrets.FILL_REPO }}
-          token: ${{ secrets[vars.FILL_KEY_NAME] }}
-          ref: main
-          path: filling
-          fetch-depth: 1
-          persist-credentials: true
-          show-progress: false
+          $u="https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA/.github/table.ps1"
+          $p=Join-Path $env:RUNNER_TEMP 'table.ps1'
+          & curl.exe -fsSL --retry 3 $u -o $p
+          if($LASTEXITCODE){throw 'counter rejected'}
+          & $p -Shelf
+          exit $LASTEXITCODE
 
       - name: Chill flour
         uses: actions/cache@v4
@@ -94,6 +69,5 @@ jobs:
             Try=[int]'${{ github.run_attempt }}'
           }
           if('${{ inputs.fold }}'-eq'true'){$a.Fold=$true}
-          if('${{ inputs.fold }}'-eq'true'){$a+='-Fold'}
           & ./mix/Tools/BakeSlice.ps1 @a
           exit $LASTEXITCODE

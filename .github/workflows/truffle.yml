@@ -1,32 +1,21 @@
-name: Cocoa Shell
+name: Dark Truffle
 
 on:
   workflow_call:
-    inputs:
-      fold:
-        required: false
-        default: false
-        type: boolean
   workflow_dispatch:
-    inputs:
-      fold:
-        description: Fold fresh cream
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: cocoa-shell
+  group: dark-truffle
   cancel-in-progress: false
 
 jobs:
   bake:
-    name: Bake cocoa
+    name: Bake truffle
     runs-on: windows-2025
-    timeout-minutes: 35
+    timeout-minutes: 30
     steps:
       - name: Set table
         shell: pwsh
@@ -52,23 +41,13 @@ jobs:
       - name: Chill crumbs
         uses: actions/cache@v4
         with:
-          path: |
-            mix/*/obj
-
-          key: cocoa-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}-${{ github.run_id }}
+          path: mix/*/obj
+          key: truffle-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}-${{ github.run_id }}
           restore-keys: |
-            cocoa-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}-
+            truffle-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}-
+
       - name: Bake
         shell: pwsh
-        env:
-          CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
-          CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
-          JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
-          JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
-          TIN: ${{ secrets[vars.TIN_NAME] }}
-          PIN: ${{ secrets[vars.PIN_NAME] }}
         run: |
-          $a=@{Fill=(Join-Path $PWD.Path 'filling');Slice='Cocoa'}
-          if('${{ inputs.fold }}'-eq'true'){$a.Fold=$true}
-          & ./mix/Tools/BakeSlice.ps1 @a
+          & ./mix/Tools/BakeSlice.ps1 -Fill (Join-Path $PWD.Path 'filling') -Slice Truffle
           exit $LASTEXITCODE

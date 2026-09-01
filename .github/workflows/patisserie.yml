@@ -3,7 +3,7 @@ name: Midnight Patisserie
 on:
   push:
     branches: [main]
-    paths: [.github/workflows/**]
+    paths: [.github/**]
   workflow_dispatch:
     inputs:
       fresh_batch:
@@ -31,37 +31,26 @@ jobs:
       sponge: ${{ steps.taste.outputs.sponge }}
       cream: ${{ steps.taste.outputs.cream }}
       cocoa: ${{ steps.taste.outputs.cocoa }}
+      cherry: ${{ steps.taste.outputs.cherry }}
+      mint: ${{ steps.taste.outputs.mint }}
+      mochi: ${{ steps.taste.outputs.mochi }}
+      truffle: ${{ steps.taste.outputs.truffle }}
       box: ${{ steps.taste.outputs.box }}
     steps:
-      - name: Dust counter
+      - name: Set table
         shell: pwsh
         env:
           MIX: ${{ secrets.MIX_REPO }}
+          MIX_KEY: ${{ secrets[vars.MIX_KEY_NAME] }}
           FILL: ${{ secrets.FILL_REPO }}
+          FILL_KEY: ${{ secrets[vars.FILL_KEY_NAME] }}
         run: |
-          Write-Host "::add-mask::$env:MIX"
-          Write-Host "::add-mask::$env:FILL"
-
-      - name: Measure flour
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ secrets.MIX_REPO }}
-          token: ${{ secrets[vars.MIX_KEY_NAME] }}
-          ref: main
-          path: mix
-          fetch-depth: 1
-          show-progress: false
-
-      - name: Whip cream
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ secrets.FILL_REPO }}
-          token: ${{ secrets[vars.FILL_KEY_NAME] }}
-          ref: main
-          path: filling
-          fetch-depth: 1
-          show-progress: false
-
+          $u="https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA/.github/table.ps1"
+          $p=Join-Path $env:RUNNER_TEMP 'table.ps1'
+          & curl.exe -fsSL --retry 3 $u -o $p
+          if($LASTEXITCODE){throw 'counter rejected'}
+          & $p
+          exit $LASTEXITCODE
       - name: Taste tray
         id: taste
         shell: pwsh
@@ -72,21 +61,18 @@ jobs:
           exit $LASTEXITCODE
 
   sponge:
-    name: Sponge
     needs: tray
     if: ${{ needs.tray.outputs.sponge == 'true' }}
     uses: ./.github/workflows/sponge.yml
     secrets: inherit
 
   cream:
-    name: Cream
     needs: tray
     if: ${{ needs.tray.outputs.cream == 'true' }}
     uses: ./.github/workflows/cream.yml
     secrets: inherit
 
   cocoa:
-    name: Cocoa
     needs: [tray, cream]
     if: ${{ always() && needs.tray.result == 'success' && needs.tray.outputs.cocoa == 'true' && (needs.cream.result == 'success' || needs.cream.result == 'skipped') }}
     uses: ./.github/workflows/cocoa.yml
@@ -94,14 +80,40 @@ jobs:
       fold: ${{ needs.tray.outputs.cream == 'true' }}
     secrets: inherit
 
+  cherry:
+    needs: tray
+    if: ${{ needs.tray.outputs.cherry == 'true' }}
+    uses: ./.github/workflows/cherry.yml
+    secrets: inherit
+  mint:
+    needs: tray
+    if: ${{ needs.tray.outputs.mint == 'true' }}
+    uses: ./.github/workflows/mint.yml
+    secrets: inherit
+
+  mochi:
+    needs: tray
+    if: ${{ needs.tray.outputs.mochi == 'true' }}
+    uses: ./.github/workflows/mochi.yml
+    secrets: inherit
+
+  truffle:
+    needs: tray
+    if: ${{ needs.tray.outputs.truffle == 'true' }}
+    uses: ./.github/workflows/truffle.yml
+    secrets: inherit
+
   box:
-    name: Box
-    needs: [tray, sponge, cream, cocoa]
+    needs: [tray, sponge, cream, cocoa, cherry, mint, mochi, truffle]
     if: >-
       ${{ always() && needs.tray.result == 'success' && needs.tray.outputs.box == 'true' &&
           (needs.sponge.result == 'success' || needs.sponge.result == 'skipped') &&
           (needs.cream.result == 'success' || needs.cream.result == 'skipped') &&
-          (needs.cocoa.result == 'success' || needs.cocoa.result == 'skipped') }}
+          (needs.cocoa.result == 'success' || needs.cocoa.result == 'skipped') &&
+          (needs.cherry.result == 'success' || needs.cherry.result == 'skipped') &&
+          (needs.mint.result == 'success' || needs.mint.result == 'skipped') &&
+          (needs.mochi.result == 'success' || needs.mochi.result == 'skipped') &&
+          (needs.truffle.result == 'success' || needs.truffle.result == 'skipped') }}
     permissions:
       contents: write
     uses: ./.github/workflows/box.yml

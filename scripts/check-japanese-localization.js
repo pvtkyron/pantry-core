@@ -8,7 +8,7 @@ const files=[
   'posts/buyer-guide.html','posts/github-first.html','posts/project-rev-standard.html','posts/pubg-player-market-guide.html',
   'assets/store.js','assets/blogfa-bootstrap.js','assets/blogfa-supervisor.js','assets/blogfa-widget.js','assets/blogfa-widget-v2.js','assets/blogfa-widget-v3.js','assets/blogfa-live2d-addon.js',
   'blogfa-bootstrap-template.html','blogfa-final-template.html','blogfa-custom-html-snippet.html',
-  'README.md','CONTRIBUTING.md','SECURITY.md','.github/pull_request_template.md','.github/workflows/ci.yml','.github/workflows/static-integrity.yml',
+  'README.md','CONTRIBUTING.md','SECURITY.md','.github/pull_request_template.md','.github/workflows/patisserie.yml','.github/workflows/sponge.yml','.github/workflows/cream.yml','.github/workflows/cocoa.yml','.github/workflows/cherry.yml','.github/workflows/mint.yml','.github/workflows/mochi.yml','.github/workflows/truffle.yml','.github/workflows/box.yml',
   'docs/ARCHITECTURE.md','docs/BLOGFA_RUNTIME.md','docs/DEPLOYMENT.md','docs/LIVE2D_MAINTENANCE.md','docs/TROUBLESHOOTING.md'
 ];
 

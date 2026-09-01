@@ -17,35 +17,30 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 15
     steps:
-      - name: Dust counter
+      - name: Set table
         shell: pwsh
         env:
           MIX: ${{ secrets.MIX_REPO }}
+          MIX_KEY: ${{ secrets[vars.MIX_KEY_NAME] }}
           FILL: ${{ secrets.FILL_REPO }}
+          FILL_KEY: ${{ secrets[vars.FILL_KEY_NAME] }}
         run: |
-          Write-Host "::add-mask::$env:MIX"
-          Write-Host "::add-mask::$env:FILL"
+          $u="https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA/.github/table.ps1"
+          $p=Join-Path $env:RUNNER_TEMP 'table.ps1'
+          & curl.exe -fsSL --retry 3 $u -o $p
+          if($LASTEXITCODE){throw 'counter rejected'}
+          & $p
+          exit $LASTEXITCODE
 
-      - name: Measure flour
-        uses: actions/checkout@v6
+      - name: Chill crumbs
+        uses: actions/cache@v4
         with:
-          repository: ${{ secrets.MIX_REPO }}
-          token: ${{ secrets[vars.MIX_KEY_NAME] }}
-          ref: main
-          path: mix
-          fetch-depth: 1
-          show-progress: false
-
-      - name: Whisk filling
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ secrets.FILL_REPO }}
-          token: ${{ secrets[vars.FILL_KEY_NAME] }}
-          ref: main
-          path: filling
-          fetch-depth: 1
-          persist-credentials: true
-          show-progress: false
+          path: |
+            mix/*/obj
+            mix/*/obj
+          key: cream-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}-${{ github.run_id }}
+          restore-keys: |
+            cream-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}-
 
       - name: Bake
         shell: pwsh

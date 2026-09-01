@@ -1,4 +1,4 @@
-name: Vanilla Sponge
+name: Cherry Tart
 
 on:
   workflow_call:
@@ -8,14 +8,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: vanilla-sponge
+  group: cherry-tart
   cancel-in-progress: false
 
 jobs:
   bake:
-    name: Bake sponge
+    name: Bake cherry
     runs-on: windows-2025
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Set table
         shell: pwsh
@@ -32,25 +32,28 @@ jobs:
           & $p
           exit $LASTEXITCODE
 
+      - name: Chill oven
+        uses: actions/cache@v4
+        with:
+          path: |
+            *-sdk/Android
+            *-sdk/Java
+            *-sdk/Smali
+          key: cherry-oven-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}
+
       - name: Chill crumbs
         uses: actions/cache@v4
         with:
           path: |
             mix/*/obj
-            mix/*/build
-          key: sponge-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}-${{ github.run_id }}
+            mix/*/x64
+            sugar-home/Projects/*/Cache
+          key: cherry-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}-${{ github.run_id }}
           restore-keys: |
-            sponge-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}-
+            cherry-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}-
 
       - name: Bake
         shell: pwsh
-        env:
-          CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
-          CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
-          JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
-          JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
-          TIN: ${{ secrets[vars.TIN_NAME] }}
-          PIN: ${{ secrets[vars.PIN_NAME] }}
         run: |
-          & ./mix/Tools/BakeSlice.ps1 -Fill (Join-Path $PWD.Path 'filling') -Slice Sponge
+          & ./mix/Tools/BakeSlice.ps1 -Fill (Join-Path $PWD.Path 'filling') -Slice Cherry
           exit $LASTEXITCODE
