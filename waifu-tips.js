@@ -20,9 +20,9 @@
 const live2d_settings = {
     // 基本设置
     // آدرس پوشه مدل‌ها روی jsDelivr
-    'modelUrl': 'https://cdn.jsdelivr.net/gh/pvtvampy/Live2dOnWebv1.0.0@master/model',
+    'modelUrl': 'model',
     // آدرس فایل مسیج‌ها
-    'tipsMessage': 'https://cdn.jsdelivr.net/gh/pvtvampy/Live2dOnWebv1.0.0@master/waifu-tips.json',
+    'tipsMessage': 'waifu-tips.json',
     // 模型设置
     'modelName': 'shizuku',
     'modelStorage': true,                       // 记忆模型，下次打开页面会加载上次选择的模型
@@ -55,8 +55,8 @@ const live2d_settings = {
     'debugMousemove': false,                    // 在控制台打印指针移动坐标，仅在 debug 为 true 时可用
     'logMessageToConsole': true,                // 在控制台打印看板娘提示消息
     'l2dVersion': '2.0.0',                      // 当前版本
-    'homePageUrl': 'https://rivens.bronya.moe/',  // 主页地址，可选 'auto'(自动), '{URL 网址}'
-    'aboutPageUrl': 'https://github.com/Konata09/Live2dOnWeb/', // 关于页地址, '{URL 网址}'
+    'homePageUrl': 'auto',  // 主页地址，可选 'auto'(自动), '{URL 网址}'
+    'aboutPageUrl': 'about.html', // 关于页地址, '{URL 网址}'
     'screenshotCaptureName': 'bronyaMoe.png',   // 看板娘截图文件名，例如 'live2d.png'
 }
 // 模型列表
@@ -512,33 +512,10 @@ function loadTipsMessage(result) {
     function showHitokoto() {
         switch (live2d_settings.hitokotoAPI) {
             case 'lwl12.com':
-                window.fetch('https://api.lwl12.com/hitokoto/v1?encode=realjson')
-                    .then(res => res.json())
-                    .then(resJson => {
-                        if (!resJson.source) {
-                            let text = waifu_tips.hitokoto_api_message['lwl12.com'][0];
-                            if (!resJson.author) text += waifu_tips.hitokoto_api_message['lwl12.com'][1];
-                            text = text.render({source: resJson.source, creator: resJson.author});
-                            window.setTimeout(function () {
-                                showMessage(text + waifu_tips.hitokoto_api_message['lwl12.com'][2], 3000, true);
-                            }, 5000);
-                        }
-                        showMessage(resJson.text, 5000, true);
-                    })
-                break;
             case 'fghrsh.net':
-                window.fetch('https://api.fghrsh.net/hitokoto/rand/?encode=jsc&uid=3335')
+                window.fetch('https://v1.hitokoto.cn')
                     .then(res => res.json())
-                    .then(resJson => {
-                        if (!resJson.source) {
-                            let text = waifu_tips.hitokoto_api_message['fghrsh.net'][0];
-                            text = text.render({source: resJson.source, date: resJson.date});
-                            window.setTimeout(function () {
-                                showMessage(text, 3000, true);
-                            }, 5000);
-                            showMessage(resJson.hitokoto, 5000, true);
-                        }
-                    })
+                    .then(resJson => showMessage(resJson.hitokoto, 5000, true))
                 break;
             case 'jinrishici.com':
                 window.fetch('https://v2.jinrishici.com/one.json')
