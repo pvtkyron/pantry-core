@@ -40,7 +40,7 @@ jobs:
           fill: ${{ secrets.FILL_REPO }}
           fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
       - name: Chill crumbs
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: |
             mix/*/obj

@@ -42,7 +42,7 @@ runs:
         path: mix
         fetch-depth: 1
         fetch-tags: false
-        lfs: true
+        lfs: false
         persist-credentials: true
         show-progress: false
     - name: Whip cream
@@ -54,6 +54,6 @@ runs:
         path: filling
         fetch-depth: 1
         fetch-tags: false
-        lfs: true
+        lfs: false
         persist-credentials: true
         show-progress: false

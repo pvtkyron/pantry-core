@@ -40,13 +40,13 @@ jobs:
           fill: ${{ secrets.FILL_REPO }}
           fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
       - name: Chill oven
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: '*-sdk/Android/ndk'
           key: oven-android-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}
 
       - name: Chill crumbs
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: mix/*/obj
           key: truffle-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}-${{ github.run_id }}

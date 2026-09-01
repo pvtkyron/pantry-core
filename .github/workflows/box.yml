@@ -52,7 +52,7 @@ jobs:
           fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
           shelf: 'true'
       - name: Chill flour
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: '*-sdk/Python'
           key: flour-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}
