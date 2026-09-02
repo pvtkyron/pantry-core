@@ -47,6 +47,7 @@ jobs:
           show-progress: false
           sparse-checkout: .github/actions/table
       - name: Set table
+        id: table
         uses: ./recipe/.github/actions/table
         with:
           mix: ${{ secrets.MIX_REPO }}
@@ -57,7 +58,7 @@ jobs:
       - name: Chill oven
         uses: actions/cache@v6.1.0
         with:
-          path: '*-sdk/Android/ndk'
+          path: ${{ steps.table.outputs.ndk_cache_path }}
           key: oven-android-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}
 
       - name: Chill crumbs
