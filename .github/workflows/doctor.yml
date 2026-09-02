@@ -86,6 +86,8 @@ jobs:
               if($s-eq'success' -and $w-eq$mix -and $f-eq$fill -and $p-eq$flow){$run='false'}
             }
           }
+          $checkout=(& git -C filling rev-parse HEAD).Trim().ToLowerInvariant()
+          if($LASTEXITCODE-ne0 -or $checkout-ne$fill){throw 'Doctor Pantry pin moved'}
           "run=$run" >> $env:GITHUB_OUTPUT
           "mix_ref=$mix" >> $env:GITHUB_OUTPUT
           "fill_ref=$fill" >> $env:GITHUB_OUTPUT
@@ -332,7 +334,7 @@ jobs:
   mark:
     name: Record doctor snapshot
     needs: [gate, workspace_python, pantry_python, node, cpp_closure, powershell, desktop, signer_smoke]
-    if: ${{ always() && needs.gate.outputs.run == 'true' }}
+    if: ${{ always() && needs.gate.result == 'success' && needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - name: Open Pantry snapshot
