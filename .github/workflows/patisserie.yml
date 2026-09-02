@@ -29,6 +29,8 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       sponge: ${{ steps.taste.outputs.sponge }}
+      meringue: ${{ steps.taste.outputs.meringue }}
+      meringue_stamp: ${{ steps.taste.outputs.meringue_stamp }}
       cream: ${{ steps.taste.outputs.cream }}
       cocoa: ${{ steps.taste.outputs.cocoa }}
       cherry: ${{ steps.taste.outputs.cherry }}
@@ -74,15 +76,29 @@ jobs:
     uses: ./.github/workflows/sponge.yml
     secrets: inherit
 
-  cream:
+  meringue:
     needs: tray
     if: ${{ needs.tray.outputs.cream == 'true' }}
+    uses: ./.github/workflows/meringue.yml
+    with:
+      stamp: ${{ needs.tray.outputs.meringue_stamp }}
+      bake: ${{ needs.tray.outputs.meringue == 'true' }}
+    secrets: inherit
+
+  cream:
+    needs: [tray, meringue]
+    if: ${{ always() && needs.tray.result == 'success' && needs.tray.outputs.cream == 'true' && needs.meringue.result == 'success' }}
     uses: ./.github/workflows/cream.yml
+    with:
+      stamp: ${{ needs.tray.outputs.meringue_stamp }}
     secrets: inherit
 
   cocoa:
-    needs: [tray, cream]
-    if: ${{ always() && needs.tray.result == 'success' && needs.tray.outputs.cocoa == 'true' && (needs.cream.result == 'success' || needs.cream.result == 'skipped') }}
+    needs: [tray, meringue, cream]
+    if: >-
+      ${{ always() && needs.tray.result == 'success' && needs.tray.outputs.cocoa == 'true' &&
+          (needs.meringue.result == 'success' || needs.meringue.result == 'skipped') &&
+          (needs.cream.result == 'success' || needs.cream.result == 'skipped') }}
     uses: ./.github/workflows/cocoa.yml
     with:
       fold: ${{ needs.tray.outputs.cream == 'true' }}
@@ -112,10 +128,11 @@ jobs:
     secrets: inherit
 
   box:
-    needs: [tray, sponge, cream, cocoa, cherry, mint, mochi, truffle]
+    needs: [tray, sponge, meringue, cream, cocoa, cherry, mint, mochi, truffle]
     if: >-
       ${{ always() && needs.tray.result == 'success' && needs.tray.outputs.box == 'true' &&
           (needs.sponge.result == 'success' || needs.sponge.result == 'skipped') &&
+          (needs.meringue.result == 'success' || needs.meringue.result == 'skipped') &&
           (needs.cream.result == 'success' || needs.cream.result == 'skipped') &&
           (needs.cocoa.result == 'success' || needs.cocoa.result == 'skipped') &&
           (needs.cherry.result == 'success' || needs.cherry.result == 'skipped') &&

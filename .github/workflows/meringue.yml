@@ -1,30 +1,36 @@
-name: Velvet Cream
+name: Sugar Meringue
 
 on:
   workflow_call:
     inputs:
       stamp:
-        required: false
-        default: ''
+        required: true
         type: string
+      bake:
+        required: true
+        type: boolean
   workflow_dispatch:
     inputs:
       stamp:
-        description: Shared base source stamp
-        required: false
-        default: ''
+        description: Base recipe stamp
+        required: true
         type: string
+      bake:
+        description: Rebuild base
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: velvet-cream
+  group: sugar-meringue
   cancel-in-progress: false
 
 jobs:
   bake:
-    name: Whip cream
+    name: Whip meringue
     runs-on: windows-2025
     timeout-minutes: 15
     steps:
@@ -50,15 +56,14 @@ jobs:
           mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
           fill: ${{ secrets.FILL_REPO }}
           fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
-      - name: Thaw base
-        if: ${{ inputs.stamp != '' }}
+      - name: Chill base
+        id: base
         uses: actions/cache@v6.1.0
         with:
           path: mix/Launcher/obj/SharedCore
           key: meringue-${{ runner.os }}-${{ hashFiles('mix/toolchains.lock.json') }}-${{ inputs.stamp }}
-          fail-on-cache-miss: true
-      - name: Prepare base
-        if: ${{ inputs.stamp == '' }}
+      - name: Bake
+        if: ${{ inputs.bake || steps.base.outputs.cache-hit != 'true' }}
         shell: pwsh
         env:
           CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
@@ -69,17 +74,4 @@ jobs:
           PIN: ${{ secrets[vars.PIN_NAME] }}
         run: |
           & ./mix/Tools/BakeSlice.ps1 -Fill (Join-Path $PWD.Path 'filling') -Slice Meringue
-          exit $LASTEXITCODE
-
-      - name: Bake
-        shell: pwsh
-        env:
-          CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
-          CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
-          JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
-          JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
-          TIN: ${{ secrets[vars.TIN_NAME] }}
-          PIN: ${{ secrets[vars.PIN_NAME] }}
-        run: |
-          & ./mix/Tools/BakeSlice.ps1 -Fill (Join-Path $PWD.Path 'filling') -Slice Cream
           exit $LASTEXITCODE
