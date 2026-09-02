@@ -29,6 +29,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       mix_ref: ${{ steps.pin.outputs.mix_ref }}
+      fill_ref: ${{ steps.pin.outputs.fill_ref }}
       sponge: ${{ steps.taste.outputs.sponge }}
       meringue: ${{ steps.taste.outputs.meringue }}
       meringue_stamp: ${{ steps.taste.outputs.meringue_stamp }}
@@ -67,16 +68,27 @@ jobs:
         shell: pwsh
         run: |
           $mix=(& git -C mix rev-parse HEAD).Trim().ToLowerInvariant()
-          if($mix -notmatch '^[0-9a-f]{40}$'){throw 'Workspace source pin rejected'}
+          $fill=(& git -C filling rev-parse HEAD).Trim().ToLowerInvariant()
+          if($mix -notmatch '^[0-9a-f]{40}$' -or $fill -notmatch '^[0-9a-f]{40}$'){throw 'Private source pin rejected'}
           "mix_ref=$mix" >> $env:GITHUB_OUTPUT
+          "fill_ref=$fill" >> $env:GITHUB_OUTPUT
       - name: Taste tray
         id: taste
         shell: pwsh
         run: |
           $a=@{Fill=(Join-Path $PWD.Path 'filling');Slice='Probe'}
-          if('${{ inputs.fresh_batch }}'-eq'true'){$a.Fresh=$true}
+          if('${{ inputs.fresh_batch }}'-eq'true' -or '${{ github.event_name }}'-eq'repository_dispatch'){$a.Fresh=$true}
           & ./mix/Tools/BakeSlice.ps1 @a
           exit $LASTEXITCODE
+
+  doctor:
+    needs: tray
+    uses: ./.github/workflows/doctor.yml
+    with:
+      mix_ref: ${{ needs.tray.outputs.mix_ref }}
+      fill_ref: ${{ needs.tray.outputs.fill_ref }}
+      force: ${{ inputs.fresh_batch || github.event_name == 'repository_dispatch' }}
+    secrets: inherit
 
   sponge:
     needs: tray
@@ -149,9 +161,9 @@ jobs:
     secrets: inherit
 
   box:
-    needs: [tray, sponge, meringue, cream, cocoa, cherry, mint, mochi, truffle]
+    needs: [tray, doctor, sponge, meringue, cream, cocoa, cherry, mint, mochi, truffle]
     if: >-
-      ${{ always() && needs.tray.result == 'success' && needs.tray.outputs.box == 'true' &&
+      ${{ always() && needs.tray.result == 'success' && needs.doctor.result == 'success' && needs.tray.outputs.box == 'true' &&
           (needs.sponge.result == 'success' || needs.sponge.result == 'skipped') &&
           (needs.meringue.result == 'success' || needs.meringue.result == 'skipped') &&
           (needs.cream.result == 'success' || needs.cream.result == 'skipped') &&

@@ -1,0 +1,370 @@
+name: Kitchen Doctor
+
+on:
+  workflow_call:
+    inputs:
+      mix_ref:
+        required: true
+        type: string
+      fill_ref:
+        required: true
+        type: string
+      force:
+        required: false
+        default: false
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      mix_ref:
+        description: Workspace ref
+        required: false
+        default: main
+        type: string
+      fill_ref:
+        description: Pantry ref
+        required: false
+        default: main
+        type: string
+      force:
+        description: Repeat checks for the same snapshot
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kitchen-doctor-${{ inputs.mix_ref }}-${{ inputs.fill_ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Taste snapshot
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.state.outputs.run }}
+      mix_ref: ${{ steps.state.outputs.mix_ref }}
+      fill_ref: ${{ steps.state.outputs.fill_ref }}
+      workflow_ref: ${{ steps.state.outputs.workflow_ref }}
+    steps:
+      - name: Open recipe
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: .github/actions/table
+      - name: Set table
+        uses: ./recipe/.github/actions/table
+        with:
+          mix: ${{ secrets.MIX_REPO }}
+          mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          mix_ref: ${{ inputs.mix_ref }}
+          fill: ${{ secrets.FILL_REPO }}
+          fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
+          fill_ref: ${{ inputs.fill_ref }}
+      - name: Read marker
+        id: state
+        shell: pwsh
+        run: |
+          $mix=(& git -C mix rev-parse HEAD).Trim().ToLowerInvariant()
+          $fill=(& git -C filling rev-parse HEAD).Trim().ToLowerInvariant()
+          $flow=(& git -C recipe rev-parse 'HEAD:.github').Trim().ToLowerInvariant()
+          if($mix -notmatch '^[0-9a-f]{40}$' -or $fill -notmatch '^[0-9a-f]{40}$' -or $flow -notmatch '^[0-9a-f]{40}$'){throw 'Doctor source pin rejected'}
+          $run='true'
+          if('${{ inputs.force }}'-ne'true'){
+            & git -C filling fetch --quiet --force origin refs/tags/pastry-doctor:refs/tags/pastry-doctor 2>$null
+            if($LASTEXITCODE-eq0){
+              $msg=(& git -C filling tag -l pastry-doctor '--format=%(contents)')-join"`n"
+              $w=[regex]::Match($msg,'(?m)^workspace=([0-9a-f]{40})$').Groups[1].Value
+              $f=[regex]::Match($msg,'(?m)^pantry=([0-9a-f]{40})$').Groups[1].Value
+              $p=[regex]::Match($msg,'(?m)^workflow=([0-9a-f]{40})$').Groups[1].Value
+              $s=[regex]::Match($msg,'(?m)^status=(success|failure|cancelled)$').Groups[1].Value
+              if($s-eq'success' -and $w-eq$mix -and $f-eq$fill -and $p-eq$flow){$run='false'}
+            }
+          }
+          "run=$run" >> $env:GITHUB_OUTPUT
+          "mix_ref=$mix" >> $env:GITHUB_OUTPUT
+          "fill_ref=$fill" >> $env:GITHUB_OUTPUT
+          "workflow_ref=$flow" >> $env:GITHUB_OUTPUT
+          Write-Host "[Doctor] run=$run workspace=$($mix.Substring(0,12)) pantry=$($fill.Substring(0,12)) workflow=$($flow.Substring(0,12))"
+
+  workspace_python:
+    name: Workspace publisher regressions
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/actions/table
+      - uses: ./recipe/.github/actions/table
+        with:
+          mix: ${{ secrets.MIX_REPO }}
+          mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          mix_ref: ${{ needs.gate.outputs.mix_ref }}
+          fill: ${{ secrets.FILL_REPO }}
+          fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
+          fill_ref: ${{ needs.gate.outputs.fill_ref }}
+      - name: Run regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd mix
+          export PYTHONDONTWRITEBYTECODE=1
+          python3 PantryPublisher/test_prepare_runner.py
+          python3 PantryPublisher/test_publish_fast_path.py
+
+  pantry_python:
+    name: Pantry regressions
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/actions/table
+      - uses: ./recipe/.github/actions/table
+        with:
+          mix: ${{ secrets.MIX_REPO }}
+          mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          mix_ref: ${{ needs.gate.outputs.mix_ref }}
+          fill: ${{ secrets.FILL_REPO }}
+          fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
+          fill_ref: ${{ needs.gate.outputs.fill_ref }}
+      - name: Run regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd filling
+          export PYTHONDONTWRITEBYTECODE=1
+          python3 tests/test_contract.py
+          python3 tests/test_free_key_contract.py
+          python3 tests/test_consumer_contract.py
+          python3 tests/test_publish_workflow_contract.py
+          python3 tests/test_prepare_snapshot_entrypoint.py
+
+  node:
+    name: Auth relay regressions
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/actions/table
+      - uses: ./recipe/.github/actions/table
+        with:
+          mix: ${{ secrets.MIX_REPO }}
+          mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          mix_ref: ${{ needs.gate.outputs.mix_ref }}
+          fill: ${{ secrets.FILL_REPO }}
+          fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
+          fill_ref: ${{ needs.gate.outputs.fill_ref }}
+      - name: Run Node tests
+        working-directory: mix
+        run: node --test AuthRelayWorker/test/*.test.mjs
+
+  cpp_closure:
+    name: C++ closure
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/actions/table
+      - uses: ./recipe/.github/actions/table
+        with:
+          mix: ${{ secrets.MIX_REPO }}
+          mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          mix_ref: ${{ needs.gate.outputs.mix_ref }}
+          fill: ${{ secrets.FILL_REPO }}
+          fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
+          fill_ref: ${{ needs.gate.outputs.fill_ref }}
+      - name: Build canonical C++ closure
+        shell: cmd
+        working-directory: mix
+        run: Tools\BuildWorkspaceCppClosure.cmd
+
+  powershell:
+    name: PowerShell / ${{ matrix.check }}
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: safety-guard
+            command: '& .\scripts\assert-powershell-safety.ps1 -Root $PWD.Path'
+          - check: safety-regressions
+            command: '& .\scripts\test-powershell-safety.ps1'
+          - check: compiler-signing
+            command: '& .\Compiler\tools\validate-signing-contract.ps1'
+          - check: compiler-signing-runtime
+            command: '& .\Compiler\tools\test-signing-identity.ps1'
+          - check: pantry-signer-acl
+            command: '& .\PantryPublisher\Test-LocalPantrySignerAcl.ps1'
+          - check: pantry-cleanup-selftest
+            command: '& .\PantryPublisher\Clear-PantryGeneratedState.ps1 -SelfTest'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/actions/table
+      - uses: ./recipe/.github/actions/table
+        with:
+          mix: ${{ secrets.MIX_REPO }}
+          mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          mix_ref: ${{ needs.gate.outputs.mix_ref }}
+          fill: ${{ secrets.FILL_REPO }}
+          fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
+          fill_ref: ${{ needs.gate.outputs.fill_ref }}
+      - name: Run check
+        shell: pwsh
+        working-directory: mix
+        run: ${{ matrix.command }}
+
+  desktop:
+    name: Desktop / ${{ matrix.target.name }} / ${{ matrix.configuration }}
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+        target:
+          - { name: Bootstrap, project: Bootstrap/Bootstrap.vcxproj }
+          - { name: SharedCore, project: Launcher/SharedCore/SharedCore.vcxproj }
+          - { name: Launcher, project: Launcher/Launcher.vcxproj }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/actions/table
+      - uses: ./recipe/.github/actions/table
+        with:
+          mix: ${{ secrets.MIX_REPO }}
+          mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          mix_ref: ${{ needs.gate.outputs.mix_ref }}
+          fill: ${{ secrets.FILL_REPO }}
+          fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
+          fill_ref: ${{ needs.gate.outputs.fill_ref }}
+      - name: Locate MSBuild
+        id: msbuild
+        shell: pwsh
+        run: |
+          $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild=& $vswhere -latest -prerelease -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          if(!$msbuild){throw 'MSBuild not found'}
+          "path=$msbuild" >> $env:GITHUB_OUTPUT
+      - name: Build
+        shell: pwsh
+        working-directory: mix
+        run: '& "${{ steps.msbuild.outputs.path }}" "${{ matrix.target.project }}" /m /nologo /v:minimal /p:Configuration=${{ matrix.configuration }} /p:Platform=x64'
+
+  signer_smoke:
+    name: Signer reuse smoke
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/actions/table
+      - uses: ./recipe/.github/actions/table
+        with:
+          mix: ${{ secrets.MIX_REPO }}
+          mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          mix_ref: ${{ needs.gate.outputs.mix_ref }}
+          fill: ${{ secrets.FILL_REPO }}
+          fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
+          fill_ref: ${{ needs.gate.outputs.fill_ref }}
+      - name: Enroll and reuse identity
+        shell: pwsh
+        working-directory: mix
+        run: |
+          $header=Join-Path $env:RUNNER_TEMP 'KyronSignerPin.hpp'
+          $fingerprint=Join-Path $env:RUNNER_TEMP 'KyronSignerPin.sha256'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File Tools/GenerateSignerPin.ps1 -OutputHeader $header -OutputFingerprint $fingerprint
+          if($LASTEXITCODE){throw "first signer pass failed: $LASTEXITCODE"}
+          $first=(Get-Content -LiteralPath $fingerprint -Raw).Trim()
+          $reuse=(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File Tools/GenerateSignerPin.ps1 -OutputHeader $header -OutputFingerprint $fingerprint 2>&1 | Out-String)
+          if($LASTEXITCODE){throw "signer reuse failed: $LASTEXITCODE"}
+          if($reuse -match 'CertMgr Succeeded|\[KYRON\]\[SIGN\] trust installed'){throw 'signer reuse mutated trust'}
+          $count=[regex]::Matches($reuse,'\[KYRON\]\[SIGN\] trust already present in LocalMachine\\(?:Root|TrustedPublisher)').Count
+          if($count-ne2){throw "expected two reused trust stores; observed $count"}
+          if((Get-Content -LiteralPath $fingerprint -Raw).Trim()-cne$first){throw 'signer fingerprint changed'}
+
+  mark:
+    name: Record doctor snapshot
+    needs: [gate, workspace_python, pantry_python, node, cpp_closure, powershell, desktop, signer_smoke]
+    if: ${{ always() && needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Open Pantry snapshot
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.FILL_REPO }}
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: ${{ needs.gate.outputs.fill_ref }}
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+      - name: Record result
+        shell: pwsh
+        env:
+          WORKSPACE_RESULT: ${{ needs.workspace_python.result }}
+          PANTRY_RESULT: ${{ needs.pantry_python.result }}
+          NODE_RESULT: ${{ needs.node.result }}
+          CPP_RESULT: ${{ needs.cpp_closure.result }}
+          POWERSHELL_RESULT: ${{ needs.powershell.result }}
+          DESKTOP_RESULT: ${{ needs.desktop.result }}
+          SIGNER_RESULT: ${{ needs.signer_smoke.result }}
+        run: |
+          $results=@($env:WORKSPACE_RESULT,$env:PANTRY_RESULT,$env:NODE_RESULT,$env:CPP_RESULT,$env:POWERSHELL_RESULT,$env:DESKTOP_RESULT,$env:SIGNER_RESULT)
+          $status=if($results-contains'failure'){'failure'}elseif($results-contains'cancelled'){'cancelled'}else{'success'}
+          $mix='${{ needs.gate.outputs.mix_ref }}';$fill='${{ needs.gate.outputs.fill_ref }}';$flow='${{ needs.gate.outputs.workflow_ref }}'
+          $message="schema=1`nworkspace=$mix`npantry=$fill`nworkflow=$flow`nstatus=$status"
+          & git -C filling config user.name pastry-bot
+          & git -C filling config user.email pastry-bot@users.noreply.github.com
+          & git -C filling tag -a -f pastry-doctor $fill -m $message
+          if($LASTEXITCODE){throw 'Doctor marker creation failed'}
+          & git -C filling push --force origin refs/tags/pastry-doctor
+          if($LASTEXITCODE){throw 'Doctor marker push failed'}
+          Write-Host "[Doctor] recorded status=$status workspace=$($mix.Substring(0,12)) pantry=$($fill.Substring(0,12)) workflow=$($flow.Substring(0,12))"

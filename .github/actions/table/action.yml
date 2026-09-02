@@ -12,6 +12,9 @@ inputs:
     required: true
   fill-key:
     required: true
+  fill_ref:
+    required: false
+    default: main
   shelf:
     required: false
     default: 'false'
@@ -56,7 +59,7 @@ runs:
       with:
         repository: ${{ inputs.fill }}
         token: ${{ inputs.fill-key }}
-        ref: main
+        ref: ${{ inputs.fill_ref }}
         path: filling
         fetch-depth: 1
         fetch-tags: false
