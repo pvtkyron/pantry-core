@@ -3,6 +3,9 @@ name: Night Box
 on:
   workflow_call:
     inputs:
+      mix_ref:
+        required: true
+        type: string
       fold:
         required: false
         default: false
@@ -37,7 +40,7 @@ jobs:
       - name: Open recipe
         uses: actions/checkout@v6
         with:
-          ref: main
+          ref: ${{ github.sha }}
           path: recipe
           fetch-depth: 1
           persist-credentials: false
@@ -48,9 +51,11 @@ jobs:
         with:
           mix: ${{ secrets.MIX_REPO }}
           mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          mix_ref: ${{ inputs.mix_ref || 'main' }}
           fill: ${{ secrets.FILL_REPO }}
           fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
           shelf: 'true'
+          shelf_ref: ${{ github.sha }}
       - name: Chill flour
         uses: actions/cache@v6.1.0
         with:

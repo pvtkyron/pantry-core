@@ -2,6 +2,10 @@ name: Dark Truffle
 
 on:
   workflow_call:
+    inputs:
+      mix_ref:
+        required: true
+        type: string
   workflow_dispatch:
 
 permissions:
@@ -26,7 +30,7 @@ jobs:
       - name: Open recipe
         uses: actions/checkout@v6
         with:
-          ref: main
+          ref: ${{ github.sha }}
           path: recipe
           fetch-depth: 1
           persist-credentials: false
@@ -37,6 +41,7 @@ jobs:
         with:
           mix: ${{ secrets.MIX_REPO }}
           mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          mix_ref: ${{ inputs.mix_ref || 'main' }}
           fill: ${{ secrets.FILL_REPO }}
           fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
       - name: Chill oven

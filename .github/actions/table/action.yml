@@ -5,6 +5,9 @@ inputs:
     required: true
   mix-key:
     required: true
+  mix_ref:
+    required: false
+    default: main
   fill:
     required: true
   fill-key:
@@ -12,6 +15,9 @@ inputs:
   shelf:
     required: false
     default: 'false'
+  shelf_ref:
+    required: false
+    default: main
 runs:
   using: composite
   steps:
@@ -27,7 +33,7 @@ runs:
       if: ${{ inputs.shelf == 'true' }}
       uses: actions/checkout@v6
       with:
-        ref: main
+        ref: ${{ inputs.shelf_ref }}
         path: shelf
         fetch-depth: 1
         persist-credentials: true
@@ -38,7 +44,7 @@ runs:
       with:
         repository: ${{ inputs.mix }}
         token: ${{ inputs.mix-key }}
-        ref: main
+        ref: ${{ inputs.mix_ref }}
         path: mix
         fetch-depth: 1
         fetch-tags: false

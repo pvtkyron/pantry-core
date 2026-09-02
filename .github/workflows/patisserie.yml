@@ -28,6 +28,7 @@ jobs:
     name: Weigh tray
     runs-on: ubuntu-24.04
     outputs:
+      mix_ref: ${{ steps.pin.outputs.mix_ref }}
       sponge: ${{ steps.taste.outputs.sponge }}
       meringue: ${{ steps.taste.outputs.meringue }}
       meringue_stamp: ${{ steps.taste.outputs.meringue_stamp }}
@@ -48,7 +49,7 @@ jobs:
       - name: Open recipe
         uses: actions/checkout@v6
         with:
-          ref: main
+          ref: ${{ github.sha }}
           path: recipe
           fetch-depth: 1
           persist-credentials: false
@@ -61,6 +62,13 @@ jobs:
           mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
           fill: ${{ secrets.FILL_REPO }}
           fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
+      - name: Pin tray
+        id: pin
+        shell: pwsh
+        run: |
+          $mix=(& git -C mix rev-parse HEAD).Trim().ToLowerInvariant()
+          if($mix -notmatch '^[0-9a-f]{40}$'){throw 'Workspace source pin rejected'}
+          "mix_ref=$mix" >> $env:GITHUB_OUTPUT
       - name: Taste tray
         id: taste
         shell: pwsh
@@ -74,6 +82,8 @@ jobs:
     needs: tray
     if: ${{ needs.tray.outputs.sponge == 'true' }}
     uses: ./.github/workflows/sponge.yml
+    with:
+      mix_ref: ${{ needs.tray.outputs.mix_ref }}
     secrets: inherit
 
   meringue:
@@ -81,6 +91,7 @@ jobs:
     if: ${{ needs.tray.outputs.cream == 'true' }}
     uses: ./.github/workflows/meringue.yml
     with:
+      mix_ref: ${{ needs.tray.outputs.mix_ref }}
       stamp: ${{ needs.tray.outputs.meringue_stamp }}
       bake: ${{ needs.tray.outputs.meringue == 'true' }}
     secrets: inherit
@@ -90,6 +101,7 @@ jobs:
     if: ${{ always() && needs.tray.result == 'success' && needs.tray.outputs.cream == 'true' && needs.meringue.result == 'success' }}
     uses: ./.github/workflows/cream.yml
     with:
+      mix_ref: ${{ needs.tray.outputs.mix_ref }}
       stamp: ${{ needs.tray.outputs.meringue_stamp }}
     secrets: inherit
 
@@ -101,6 +113,7 @@ jobs:
           (needs.cream.result == 'success' || needs.cream.result == 'skipped') }}
     uses: ./.github/workflows/cocoa.yml
     with:
+      mix_ref: ${{ needs.tray.outputs.mix_ref }}
       fold: ${{ needs.tray.outputs.cream == 'true' }}
     secrets: inherit
 
@@ -108,23 +121,31 @@ jobs:
     needs: tray
     if: ${{ needs.tray.outputs.cherry == 'true' }}
     uses: ./.github/workflows/cherry.yml
+    with:
+      mix_ref: ${{ needs.tray.outputs.mix_ref }}
     secrets: inherit
   mint:
     needs: tray
     if: ${{ needs.tray.outputs.mint == 'true' }}
     uses: ./.github/workflows/mint.yml
+    with:
+      mix_ref: ${{ needs.tray.outputs.mix_ref }}
     secrets: inherit
 
   mochi:
     needs: tray
     if: ${{ needs.tray.outputs.mochi == 'true' }}
     uses: ./.github/workflows/mochi.yml
+    with:
+      mix_ref: ${{ needs.tray.outputs.mix_ref }}
     secrets: inherit
 
   truffle:
     needs: tray
     if: ${{ needs.tray.outputs.truffle == 'true' }}
     uses: ./.github/workflows/truffle.yml
+    with:
+      mix_ref: ${{ needs.tray.outputs.mix_ref }}
     secrets: inherit
 
   box:
@@ -143,5 +164,6 @@ jobs:
       contents: write
     uses: ./.github/workflows/box.yml
     with:
+      mix_ref: ${{ needs.tray.outputs.mix_ref }}
       fold: ${{ needs.tray.outputs.cream == 'true' && needs.tray.outputs.cocoa != 'true' }}
     secrets: inherit
