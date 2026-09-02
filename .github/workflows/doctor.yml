@@ -151,6 +151,7 @@ jobs:
           set -euo pipefail
           cd filling
           export PYTHONDONTWRITEBYTECODE=1
+          python3 -m pip install --disable-pip-version-check --no-input -r tools/requirements-launch.txt
           python3 tests/test_contract.py
           python3 tests/test_free_key_contract.py
           python3 tests/test_consumer_contract.py
@@ -204,6 +205,20 @@ jobs:
           fill: ${{ secrets.FILL_REPO }}
           fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
           fill_ref: ${{ needs.gate.outputs.fill_ref }}
+      - name: Bind hosted MSVC to managed path
+        shell: pwsh
+        working-directory: mix
+        run: |
+          $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs=(& $vswhere -latest -prerelease -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if(!$vs){throw 'Hosted MSVC unavailable'}
+          $msbuild=Join-Path $vs 'MSBuild\Current\Bin\MSBuild.exe'
+          if(!(Test-Path -LiteralPath $msbuild -PathType Leaf)){throw "Hosted MSBuild canonical path unavailable: $msbuild"}
+          $managed=[IO.Path]::GetFullPath((Join-Path $PWD.Path '..\kyron-sdk\VisualStudio\BuildTools'))
+          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $managed)|Out-Null
+          if(Test-Path -LiteralPath $managed){throw "Managed hosted path already exists: $managed"}
+          New-Item -ItemType Junction -Path $managed -Target $vs|Out-Null
+          Write-Host '[Doctor] hosted MSVC bound to managed path'
       - name: Build canonical C++ closure
         shell: cmd
         working-directory: mix
@@ -247,7 +262,7 @@ jobs:
           fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
           fill_ref: ${{ needs.gate.outputs.fill_ref }}
       - name: Run check
-        shell: pwsh
+        shell: powershell
         working-directory: mix
         run: ${{ matrix.command }}
 
