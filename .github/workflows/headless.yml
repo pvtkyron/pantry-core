@@ -1,6 +1,9 @@
 name: Headless Core
 
 on:
+  push:
+    paths:
+      - .github/workflows/headless.yml
   workflow_call:
     inputs:
       mix_ref:
@@ -27,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: headless-core-${{ inputs.mix_ref }}-${{ inputs.fill_ref }}
+  group: headless-core-${{ inputs.mix_ref || 'main' }}-${{ inputs.fill_ref || 'main' }}
   cancel-in-progress: false
 
 jobs:
@@ -55,10 +58,10 @@ jobs:
         with:
           mix: ${{ secrets.MIX_REPO }}
           mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
-          mix_ref: ${{ inputs.mix_ref }}
+          mix_ref: ${{ inputs.mix_ref || 'main' }}
           fill: ${{ secrets.FILL_REPO }}
           fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
-          fill_ref: ${{ inputs.fill_ref }}
+          fill_ref: ${{ inputs.fill_ref || 'main' }}
       - name: Run headless suite
         shell: powershell
         working-directory: mix
