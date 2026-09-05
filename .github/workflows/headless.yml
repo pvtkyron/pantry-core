@@ -1,0 +1,66 @@
+name: Headless Core
+
+on:
+  workflow_call:
+    inputs:
+      mix_ref:
+        required: true
+        type: string
+      fill_ref:
+        required: false
+        default: main
+        type: string
+  workflow_dispatch:
+    inputs:
+      mix_ref:
+        description: Workspace ref
+        required: false
+        default: main
+        type: string
+      fill_ref:
+        description: Pantry ref
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: headless-core-${{ inputs.mix_ref }}-${{ inputs.fill_ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Headless / ${{ matrix.configuration }} / ${{ matrix.platform }}
+    runs-on: windows-2025
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+        platform: [x64, Win32]
+    steps:
+      - name: Open recipe
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: .github/actions/table
+      - name: Set table
+        uses: ./recipe/.github/actions/table
+        with:
+          mix: ${{ secrets.MIX_REPO }}
+          mix-key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          mix_ref: ${{ inputs.mix_ref }}
+          fill: ${{ secrets.FILL_REPO }}
+          fill-key: ${{ secrets[vars.FILL_KEY_NAME] }}
+          fill_ref: ${{ inputs.fill_ref }}
+      - name: Run headless suite
+        shell: powershell
+        working-directory: mix
+        run: |
+          & .\Tools\Test-KyronHeadless.ps1 -Suite All -Configuration '${{ matrix.configuration }}' -Platform '${{ matrix.platform }}'
