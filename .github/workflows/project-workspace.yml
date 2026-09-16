@@ -101,12 +101,22 @@ jobs:
             if($LASTEXITCODE){throw 'Workspace release recipe rejected'}
             Write-Host '[PROJECT/WORKSPACE][OK]'
           }catch{
-            $phase='unknown'
+            $slice='unknown';$phase='unknown'
             if(Test-Path $log){
-              $m=[regex]::Match((Get-Content -LiteralPath $log -Raw),'(?m)^\[Patisserie\]\[FAIL\] phase=([a-z0-9-]{1,64})')
-              if($m.Success){$phase=$m.Groups[1].Value}
+              $raw=Get-Content -LiteralPath $log -Raw
+              $failed=[regex]::Matches($raw,'(?m)^\[Patisserie\]\[SERIAL\]\[(?:FAIL|TIMEOUT)\] slice=([A-Za-z0-9_-]{1,32})(?:\s+.*)?$')
+              if($failed.Count){$slice=$failed[$failed.Count-1].Groups[1].Value}
+              $running=[regex]::Matches($raw,'(?m)^\[Patisserie\]\[SERIAL\]\[RUN\] slice=([A-Za-z0-9_-]{1,32}) phase=([A-Za-z0-9._-]{1,64})\s+elapsed-sec=\d+\s*$')
+              if($running.Count){
+                $last=$running[$running.Count-1]
+                if($slice-eq'unknown'){$slice=$last.Groups[1].Value}
+                $phase=$last.Groups[2].Value
+              }else{
+                $begun=[regex]::Matches($raw,'(?m)^\[Patisserie\]\[SERIAL\]\[BEGIN\] ([A-Za-z0-9_-]{1,32})\s*$')
+                if($begun.Count-and$slice-eq'unknown'){$slice=$begun[$begun.Count-1].Groups[1].Value}
+              }
             }
-            Write-Host "[PROJECT/WORKSPACE][FAIL] phase=$phase"
+            Write-Host "[PROJECT/WORKSPACE][FAIL] slice=$slice phase=$phase"
             exit 1
           }finally{
             if(Test-Path $log){Remove-Item $log -Force -ErrorAction SilentlyContinue}
