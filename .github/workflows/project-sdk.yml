@@ -56,14 +56,11 @@ jobs:
         run: |
           $log=Join-Path $env:RUNNER_TEMP 'project-sdk.log'
           try{
-            & python3 ./source/sdk/verify_sdk_contract.py ./source/sdk/ANO_SDK.hpp *>&1 | Set-Content -LiteralPath $log
+            & python3 ./source/sdk/verify_sdk_contract.py *>&1 | Set-Content -LiteralPath $log
             if($LASTEXITCODE){throw 'SDK validation rejected'}
             Write-Host '[PROJECT/SDK][OK]'
           }catch{
             Write-Host '[PROJECT/SDK][FAIL]'
-            if(Test-Path -LiteralPath $log){
-              Get-Content -LiteralPath $log | ForEach-Object { Write-Host "[PROJECT/SDK][DETAIL] $_" }
-            }
             exit 1
           }finally{
             if(Test-Path $log){Remove-Item $log -Force -ErrorAction SilentlyContinue}
