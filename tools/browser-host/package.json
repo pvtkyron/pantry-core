@@ -1,8 +1,0 @@
-{
-  "name":"project-rev-browser-host",
-  "version":"1.0.0",
-  "private":true,
-  "type":"module",
-  "scripts":{"start":"node server.mjs","test":"node --test test.mjs"},
-  "dependencies":{"puppeteer-core":"25.10.0"}
-}
