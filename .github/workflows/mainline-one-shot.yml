@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   cleanup:
-    if: "${{ github.event.head_commit.message == 'ops: execute mainline branch cleanup v2' }}"
+    if: "${{ github.event.head_commit.message == 'ops: execute mainline branch cleanup v3' }}"
     runs-on: ubuntu-24.04
     env:
       MIX_TOKEN: ${{ secrets[vars.MIX_KEY_NAME] }}
@@ -28,23 +28,23 @@ jobs:
           Need 'MIX_TOKEN' $env:MIX_TOKEN
           Need 'FILL_TOKEN' $env:FILL_TOKEN
 
-          function Gh([string]$Token,[string[]]$Args,[switch]$Allow404){
+          function InvokeGh([string]$Token,[string[]]$CommandArgs,[switch]$Allow404){
             $old=$env:GH_TOKEN
             try{
               $env:GH_TOKEN=$Token
-              $out=@(& timeout 20s gh @Args 2>&1)
+              $out=@(& timeout 20s gh @CommandArgs 2>&1)
               $code=$LASTEXITCODE
-              if($code-eq124){throw "GitHub API timeout: $($Args -join ' ')"}
+              if($code-eq124){throw "GitHub API timeout: $($CommandArgs -join ' ')"}
               if($code-ne0){
                 $msg=$out -join "`n"
                 if($Allow404-and$msg-match'(?i)(HTTP 404|Not Found)'){return $null}
-                throw "GitHub API command failed: $($Args -join ' ')`n$msg"
+                throw "GitHub API command failed: $($CommandArgs -join ' ')`n$msg"
               }
               return $out
             }finally{$env:GH_TOKEN=$old}
           }
           function RefSha([string]$Repo,[string]$Branch,[string]$Token,[switch]$AllowMissing){
-            $out=Gh $Token @('api',"repos/$Repo/git/ref/heads/$Branch",'--jq','.object.sha') -Allow404:$AllowMissing
+            $out=InvokeGh $Token @('api',"repos/$Repo/git/ref/heads/$Branch",'--jq','.object.sha') -Allow404:$AllowMissing
             if($null-eq$out){return $null}
             return (($out) -join '').Trim()
           }
@@ -57,11 +57,11 @@ jobs:
             $got=RefSha $Repo $Branch $Token -AllowMissing
             if($null-eq$got){Write-Host "[REF/CLEAN][SKIP] already absent $Repo $Branch";return}
             if($got-ne$Expected){throw "branch head changed: $Repo $Branch expected=$Expected got=$got"}
-            [void](Gh $Token @('api','--method','DELETE',"repos/$Repo/git/refs/heads/$Branch"))
+            [void](InvokeGh $Token @('api','--method','DELETE',"repos/$Repo/git/refs/heads/$Branch"))
             Write-Host "[REF/CLEAN][OK] $Repo $Branch"
           }
           function AssertMainOnly([string]$Repo,[string]$Token){
-            $json=(Gh $Token @('api',"repos/$Repo/branches?per_page=100")) -join "`n"
+            $json=(InvokeGh $Token @('api',"repos/$Repo/branches?per_page=100")) -join "`n"
             $names=@(($json|ConvertFrom-Json)|ForEach-Object{[string]$_.name})
             if($names.Count-ne1-or$names[0]-ne'main'){throw "extra branch remains in $Repo : $($names -join ', ')"}
             Write-Host "[REF/MAIN-ONLY][OK] $Repo"
