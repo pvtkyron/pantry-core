@@ -76,6 +76,40 @@ jobs:
           persist-credentials: true
           show-progress: false
 
+      - name: Materialize canonical code signer
+        shell: pwsh
+        env:
+          KYRON_CODESIGN_PFX_BASE64: ${{ secrets.KYRON_CODESIGN_PFX_BASE64 }}
+          KYRON_CODESIGN_PASSWORD_SECRET: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PFX_BASE64)){throw 'canonical signing secret unavailable: KYRON_CODESIGN_PFX_BASE64'}
+          if([string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PASSWORD_SECRET)){throw 'canonical signing secret unavailable: KYRON_CODESIGN_PASSWORD'}
+          Write-Host "::add-mask::$($env:KYRON_CODESIGN_PFX_BASE64)"
+          Write-Host "::add-mask::$($env:KYRON_CODESIGN_PASSWORD_SECRET)"
+          $pfx=Join-Path $env:RUNNER_TEMP 'kyron-canonical.pfx'
+          try{$raw=[Convert]::FromBase64String($env:KYRON_CODESIGN_PFX_BASE64)}catch{throw 'canonical signing PFX base64 is invalid'}
+          [IO.File]::WriteAllBytes($pfx,$raw)
+          $meta=Get-Content -LiteralPath './source/security/signing/canonical-signer.json' -Raw|ConvertFrom-Json
+          $flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+          try{$cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$env:KYRON_CODESIGN_PASSWORD_SECRET,$flags)}catch{throw 'canonical signing PFX could not be opened'}
+          try{
+            if(!$cert.HasPrivateKey){throw 'canonical signing PFX has no private key'}
+            $sha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($cert.RawData)).ToLowerInvariant()
+            if($sha-ne([string]$meta.certificate_sha256).ToLowerInvariant()){throw 'canonical signing certificate SHA-256 mismatch'}
+            if(($cert.Thumbprint-replace'\s','').ToLowerInvariant()-ne([string]$meta.thumbprint_sha1).ToLowerInvariant()){throw 'canonical signing certificate SHA-1 mismatch'}
+            $rsa=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($cert)
+            if($null-eq$rsa-or$rsa.KeySize-ne2048){throw 'canonical signing certificate RSA key mismatch'}
+            $mod=$rsa.ExportParameters($false).Modulus
+            $modSha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($mod)).ToLowerInvariant()
+            if($modSha-ne([string]$meta.public_modulus_sha256).ToLowerInvariant()){throw 'canonical signing public modulus mismatch'}
+            Write-Host "[SIGNING/CANONICAL][OK] certificate_sha256=$sha"
+          }finally{
+            if($null-ne$rsa){$rsa.Dispose()}
+            $cert.Dispose()
+            [Security.Cryptography.CryptographicOperations]::ZeroMemory($raw)
+          }
+
       - name: Chill toolchains
         uses: actions/cache@v6.1.0
         with:
@@ -94,6 +128,8 @@ jobs:
           JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
           TIN: ${{ secrets[vars.TIN_NAME] }}
           PIN: ${{ secrets[vars.PIN_NAME] }}
+          KYRON_CODESIGN_PFX: ${{ runner.temp }}\kyron-canonical.pfx
+          KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
         run: |
           $log=Join-Path $env:RUNNER_TEMP 'workspace-release.log'
           try{
@@ -110,6 +146,16 @@ jobs:
             exit 1
           }finally{
             if(Test-Path $log){Remove-Item $log -Force -ErrorAction SilentlyContinue}
+          }
+
+      - name: Remove ephemeral canonical signer
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $pfx=Join-Path $env:RUNNER_TEMP 'kyron-canonical.pfx'
+          if(Test-Path -LiteralPath $pfx -PathType Leaf){
+            [IO.File]::WriteAllBytes($pfx,(New-Object byte[] ((Get-Item -LiteralPath $pfx).Length)))
+            Remove-Item -LiteralPath $pfx -Force
           }
 
       - name: Pin private Pantry delivery
