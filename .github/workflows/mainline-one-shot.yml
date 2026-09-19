@@ -1,0 +1,137 @@
+name: One-shot mainline ref cleanup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/mainline-one-shot.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    if: "${{ github.event.head_commit.message == 'ops: one-shot mainline branch cleanup' }}"
+    runs-on: ubuntu-24.04
+    env:
+      MIX_TOKEN: ${{ secrets[vars.MIX_KEY_NAME] }}
+      FILL_TOKEN: ${{ secrets[vars.FILL_KEY_NAME] }}
+      CORE_TOKEN: ${{ github.token }}
+    steps:
+      - name: Delete only pre-verified extra refs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          function Need([string]$Name,[string]$Value){
+            if([string]::IsNullOrWhiteSpace($Value)){throw "required token unavailable: $Name"}
+          }
+          Need 'MIX_TOKEN' $env:MIX_TOKEN
+          Need 'FILL_TOKEN' $env:FILL_TOKEN
+
+          function Gh([string]$Token,[string[]]$Args){
+            $old=$env:GH_TOKEN
+            try{
+              $env:GH_TOKEN=$Token
+              $out=@(& gh @Args 2>&1)
+              if($LASTEXITCODE-ne0){throw "GitHub API command failed: $($Args -join ' ')`n$($out -join "`n")"}
+              return $out
+            }finally{$env:GH_TOKEN=$old}
+          }
+          function RefSha([string]$Repo,[string]$Branch,[string]$Token){
+            return ((Gh $Token @('api',"repos/$Repo/git/ref/heads/$Branch",'--jq','.object.sha')) -join '').Trim()
+          }
+          function RequireHead([string]$Repo,[string]$Branch,[string]$Expected,[string]$Token){
+            if($Branch-eq'main'){throw 'main deletion guard tripped'}
+            $got=RefSha $Repo $Branch $Token
+            if($got-ne$Expected){throw "branch head changed: $Repo $Branch expected=$Expected got=$got"}
+          }
+          function Tree([string]$Repo,[string]$Ref,[string]$Token){
+            $sha=RefSha $Repo $Ref $Token
+            $json=(Gh $Token @('api',"repos/$Repo/git/trees/$sha?recursive=1")) -join "`n"
+            $obj=$json|ConvertFrom-Json
+            $map=@{}
+            foreach($e in @($obj.tree)){if($e.type-eq'blob'){$map[[string]$e.path]=[string]$e.sha}}
+            return $map
+          }
+          function DeleteRef([string]$Repo,[string]$Branch,[string]$Expected,[string]$Token){
+            RequireHead $Repo $Branch $Expected $Token
+            [void](Gh $Token @('api','--method','DELETE',"repos/$Repo/git/refs/heads/$Branch"))
+            Write-Host "[REF/CLEAN][OK] $Repo $Branch"
+          }
+          function RequireContained([hashtable]$Main,[hashtable]$Branch,[string]$Prefix){
+            $items=@($Branch.GetEnumerator()|Where-Object{$_.Key.StartsWith($Prefix,[StringComparison]::Ordinal)})
+            if(!$items.Count){throw "branch subtree missing: $Prefix"}
+            foreach($e in $items){
+              if(!$Main.ContainsKey($e.Key)-or$Main[$e.Key]-ne$e.Value){throw "main does not contain branch blob: $($e.Key)"}
+            }
+          }
+
+          $workspace='pvtkyron/Workspace'
+          RequireHead $workspace 'kyron-recovered-unified-20260919' '49af6913b6cc0d7afcc09b818d39dffabbdfc22a' $env:MIX_TOKEN
+          RequireHead $workspace 'kyron-unified-client-20260919' '4bcfe672a51ae473a1eab5fbb3fb6aa037178fb7' $env:MIX_TOKEN
+          $wm=Tree $workspace 'main' $env:MIX_TOKEN
+          foreach($p in @(
+            'src/windows/Windows/Main.cpp',
+            'src/windows/Launcher/runtime/client/ClientMode.cpp',
+            'src/windows/Launcher/runtime/client/EmbeddedManagedHost.cpp',
+            'src/windows/Launcher/runtime/core/managed/KyronCoreService.csproj'
+          )){if(!$wm.ContainsKey($p)){throw "Workspace supersession sentinel missing: $p"}}
+          if($wm.ContainsKey('src/windows/KyronControlCenter/KyronControl.csproj')){throw 'obsolete KyronControlCenter architecture returned on main'}
+          $cmp=((Gh $env:MIX_TOKEN @('api',"repos/$workspace/compare/kyron-recovered-unified-20260919...main",'--jq','.status')) -join '').Trim()
+          if($cmp-notin@('ahead','identical')){throw "recovery branch is not contained by Workspace main: $cmp"}
+          DeleteRef $workspace 'kyron-recovered-unified-20260919' '49af6913b6cc0d7afcc09b818d39dffabbdfc22a' $env:MIX_TOKEN
+          DeleteRef $workspace 'kyron-unified-client-20260919' '4bcfe672a51ae473a1eab5fbb3fb6aa037178fb7' $env:MIX_TOKEN
+
+          $pantry='pvtkyron/pantry'
+          RequireHead $pantry 'net-scout-v1-20260918' 'b9c93dc6ff9c98c90bb8939f38566ce109f9d82b' $env:FILL_TOKEN
+          $pm=Tree $pantry 'main' $env:FILL_TOKEN
+          $pb=Tree $pantry 'net-scout-v1-20260918' $env:FILL_TOKEN
+          foreach($p in @(
+            'tests/test_kyron_net_catalog.py',
+            'tools/kyron_net_bench.py',
+            'tools/kyron_net_catalog.py',
+            'tools/kyron_net_select.py'
+          )){
+            if(!$pm.ContainsKey($p)-or!$pb.ContainsKey($p)-or$pm[$p]-ne$pb[$p]){throw "Pantry replay mismatch: $p"}
+          }
+          DeleteRef $pantry 'net-scout-v1-20260918' 'b9c93dc6ff9c98c90bb8939f38566ce109f9d82b' $env:FILL_TOKEN
+
+          $cdn='pvtkyron/cdn'
+          $cm=Tree $cdn 'main' $env:MIX_TOKEN
+          $suite=@{
+            'kyron-suite-v10.1.0'=@('90a0f483e26d484f66a6fb074bc670ce5dcc95d0','kyron-suite/v10.1.0/')
+            'kyron-suite-v10.2.0'=@('e41872bb03c51775261470a8cf6f580fe14a6e6c','kyron-suite/v10.2.0/')
+            'kyron-suite-v11.0.0'=@('ebf3817b3a14cdbc71206e4320ae801899f62941','kyron-suite/v11.0.0/')
+          }
+          foreach($b in $suite.Keys){
+            RequireHead $cdn $b $suite[$b][0] $env:MIX_TOKEN
+            $bt=Tree $cdn $b $env:MIX_TOKEN
+            RequireContained $cm $bt $suite[$b][1]
+          }
+          $same=@(
+            'codex/kyron-9-19-cdn-20260825',
+            'codex/kyron-9-19-origin-fix-20260825',
+            'codex/kyron-9.21.1-scope-fix',
+            'codex/kyron-gateway-012345678910',
+            'kyron-9.20-kura-ui',
+            'kyron-9.20.1-login-startup-fix',
+            'kyron-9.20.2-popup-width-fix',
+            'kyron-9.21-profile-login-scope',
+            'kyron-v10-release'
+          )
+          foreach($b in $same){RequireHead $cdn $b 'cb42b5fb7a248c051783ea5f4d987803f9fd3faa' $env:MIX_TOKEN}
+          foreach($b in $same){DeleteRef $cdn $b 'cb42b5fb7a248c051783ea5f4d987803f9fd3faa' $env:MIX_TOKEN}
+          foreach($b in $suite.Keys){DeleteRef $cdn $b $suite[$b][0] $env:MIX_TOKEN}
+
+          function AssertMainOnly([string]$Repo,[string]$Token){
+            $json=(Gh $Token @('api',"repos/$Repo/branches?per_page=100")) -join "`n"
+            $names=@(($json|ConvertFrom-Json)|ForEach-Object{[string]$_.name})
+            if($names.Count-ne1-or$names[0]-ne'main'){throw "extra branch remains in $Repo : $($names -join ', ')"}
+            Write-Host "[REF/MAIN-ONLY][OK] $Repo"
+          }
+          AssertMainOnly 'pvtkyron/Workspace' $env:MIX_TOKEN
+          AssertMainOnly 'pvtkyron/pantry' $env:FILL_TOKEN
+          AssertMainOnly 'pvtkyron/sensevity' $env:MIX_TOKEN
+          AssertMainOnly 'pvtkyron/cdn' $env:MIX_TOKEN
+          AssertMainOnly 'pvtkyron/pantry-core' $env:CORE_TOKEN
+          Write-Host '[REF/CLEANUP][PASS] all repositories are main-only'
