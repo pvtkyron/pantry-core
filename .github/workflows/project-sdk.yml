@@ -61,6 +61,11 @@ jobs:
             Write-Host '[PROJECT/SDK][OK]'
           }catch{
             Write-Host '[PROJECT/SDK][FAIL]'
+            if(Test-Path $log){
+              Write-Host '[PROJECT/SDK][DIAGNOSTIC/BEGIN]'
+              Get-Content -LiteralPath $log -Tail 60
+              Write-Host '[PROJECT/SDK][DIAGNOSTIC/END]'
+            }
             exit 1
           }finally{
             if(Test-Path $log){Remove-Item $log -Force -ErrorAction SilentlyContinue}
