@@ -51,7 +51,7 @@ jobs:
 
   web:
     name: 3 · Web project
-    needs: sdk
+    needs: [sources, sdk]
     if: ${{ needs.sdk.result == 'success' }}
     uses: ./.github/workflows/project-web.yml
     with:
