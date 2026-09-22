@@ -106,10 +106,10 @@ jobs:
       - name: Materialize canonical Pantry signer
         shell: pwsh
         env:
-          CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
-          CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
-          JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
-          JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
+          CREAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+          CREAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+          JAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+          JAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
         run: |
           $ErrorActionPreference='Stop'
           foreach($n in @('CREAM_A','CREAM_B','JAM_A','JAM_B')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical local Pantry signer input missing: $n"}}
@@ -172,7 +172,7 @@ jobs:
           & .\source\scripts\ensure-workspace-toolchain.ps1
           if(!$?){throw 'Canonical Workspace toolchain bootstrap failed'}
 
-      - name: Build and publish Pantry quietly
+      - name: Build and prepare private Pantry quietly
         shell: pwsh
         env:
           KYRON_CODESIGN_PFX: ${{ runner.temp }}\kyron-canonical.pfx
@@ -187,11 +187,11 @@ jobs:
             if($missingSigning.Count){throw "hosted canonical local signer state missing: $($missingSigning-join',')"}
             $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
             $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
-            Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=prepare+publish sha256=$recipeSha"
-            $releaseArgs=@{PantryPath=(Join-Path $PWD.Path 'filling');PantryCorePath=(Join-Path $PWD.Path 'shelf');RunId=[long]'${{ github.run_id }}';RunAttempt=[int]'${{ github.run_attempt }}';RuntimeChannel='${{ inputs.runtime_channel }}'}
+            Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=prepare-only sha256=$recipeSha"
+            $releaseArgs=@{PantryPath=(Join-Path $PWD.Path 'filling');PantryCorePath=(Join-Path $PWD.Path 'shelf');RunId=[long]'${{ github.run_id }}';RunAttempt=[int]'${{ github.run_attempt }}';RuntimeChannel='${{ inputs.runtime_channel }}';PrepareOnly=$true}
             if('${{ inputs.include_launcher }}'-eq'true'){$releaseArgs.IncludeLauncher=$true}
             & $recipe @releaseArgs *>&1 | Set-Content -LiteralPath $log
-            if($LASTEXITCODE){throw 'Canonical Workspace/Pantry release runner rejected one-shot publish mode'}
+            if($LASTEXITCODE){throw 'Canonical Workspace/Pantry release runner rejected private prepare-only mode'}
             Write-Host '[PROJECT/WORKSPACE][OK]'
           }catch{
             $detail=[string]$_.Exception.Message

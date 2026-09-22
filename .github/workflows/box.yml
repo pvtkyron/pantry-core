@@ -92,6 +92,23 @@ jobs:
             if($LASTEXITCODE){throw "release main binding rejected: $repo"}
           }
 
+      - name: Materialize canonical Pantry signer
+        shell: pwsh
+        env:
+          CREAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+          CREAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+          JAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+          JAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($n in @('CREAM_A','CREAM_B','JAM_A','JAM_B')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical local Pantry signer input missing: $n"}}
+          . .\source\scripts\workspace-common.ps1
+          $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1'
+          New-Item -ItemType Directory -Force -Path $root|Out-Null
+          $utf8=[Text.UTF8Encoding]::new($false)
+          foreach($x in @(@('bootstrap_root_private.pem','CREAM_A'),@('bootstrap_root_public.pem','CREAM_B'),@('content_private.pem','JAM_A'),@('content_public.pem','JAM_B'))){[IO.File]::WriteAllText((Join-Path $root $x[0]),([Environment]::GetEnvironmentVariable($x[1])).Trim()+"`n",$utf8)}
+          & .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -Workspace (Join-Path $PWD.Path 'source') -ExpectedProfile local-machine-v1 -Ephemeral -RequireExistingIdentity|Out-Null
+          if(!$?){throw 'Canonical local Pantry signer validation failed'}
       - name: Materialize canonical code signer
         shell: pwsh
         env:
@@ -155,9 +172,7 @@ jobs:
         env:
           KYRON_CODESIGN_PFX: ${{ runner.temp }}\kyron-canonical.pfx
           KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
-          KYRON_PANTRY_SIGNER_PROFILE: repository-v1
-          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets[vars.CREAM_A_NAME] }}
-          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets[vars.JAM_A_NAME] }}
+          KYRON_PANTRY_SIGNER_PROFILE: local-machine-v1
         run: |
           $log=Join-Path $env:RUNNER_TEMP 'pantry-publish.log'
           try{
@@ -191,3 +206,7 @@ jobs:
             [IO.File]::WriteAllBytes($pfx,(New-Object byte[] ((Get-Item -LiteralPath $pfx).Length)))
             Remove-Item -LiteralPath $pfx -Force
           }
+          . .\source\scripts\workspace-common.ps1
+          $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1'
+          foreach($name in @('bootstrap_root_private.pem','content_private.pem')){$q=Join-Path $root $name;if(Test-Path -LiteralPath $q -PathType Leaf){[IO.File]::WriteAllBytes($q,(New-Object byte[] ((Get-Item -LiteralPath $q).Length)))}}
+          if(Test-Path -LiteralPath $root -PathType Container){Remove-Item -LiteralPath $root -Recurse -Force}

@@ -62,20 +62,23 @@ jobs:
             if($LASTEXITCODE){throw "release main binding rejected: $repo"}
           }
 
-      - name: Require repository Pantry signer
+      - name: Materialize canonical Pantry signer
         shell: pwsh
         env:
-          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_REPOSITORY_BOOTSTRAP_PRIVATE_PEM }}
-          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_REPOSITORY_CONTENT_PRIVATE_PEM }}
+          CREAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+          CREAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+          JAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+          JAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
         run: |
           $ErrorActionPreference='Stop'
-          $missing=@('KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM','KYRON_CONTENT_PRIVATE_PEM')|Where-Object{[string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_))}
-          if($missing.Count){throw "repository-v1 signing secret unavailable: $($missing-join',')"}
-          function SpkiSha([string]$pem){$e=[Security.Cryptography.ECDsa]::Create();try{$e.ImportFromPem($pem);return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($e.ExportSubjectPublicKeyInfo())).ToLowerInvariant()}finally{$e.Dispose()}}
-          $bootstrapExpected=SpkiSha ([IO.File]::ReadAllText('./filling/security/keys/bootstrap_root_public.pem'));$contentExpected=SpkiSha ([IO.File]::ReadAllText('./filling/security/keys/content_public.pem'))
-          if((SpkiSha $env:KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM)-ne$bootstrapExpected){throw 'repository-v1 bootstrap private key does not match Pantry public key'}
-          if((SpkiSha $env:KYRON_CONTENT_PRIVATE_PEM)-ne$contentExpected){throw 'repository-v1 content private key does not match Pantry public key'}
-          Write-Host '[PANTRY][SIGNER/READY] repository-v1 keypairs verified'
+          foreach($n in @('CREAM_A','CREAM_B','JAM_A','JAM_B')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical local Pantry signer input missing: $n"}}
+          . .\source\scripts\workspace-common.ps1
+          $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1'
+          New-Item -ItemType Directory -Force -Path $root|Out-Null
+          $utf8=[Text.UTF8Encoding]::new($false)
+          foreach($x in @(@('bootstrap_root_private.pem','CREAM_A'),@('bootstrap_root_public.pem','CREAM_B'),@('content_private.pem','JAM_A'),@('content_public.pem','JAM_B'))){[IO.File]::WriteAllText((Join-Path $root $x[0]),([Environment]::GetEnvironmentVariable($x[1])).Trim()+"`n",$utf8)}
+          & .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -Workspace (Join-Path $PWD.Path 'source') -ExpectedProfile local-machine-v1 -Ephemeral -RequireExistingIdentity|Out-Null
+          if(!$?){throw 'Canonical local Pantry signer validation failed'}
       - name: Materialize canonical code signer
         shell: pwsh
         env:
@@ -141,13 +144,9 @@ jobs:
         env:
           KYRON_CODESIGN_PFX: ${{ runner.temp }}\kyron-canonical.pfx
           KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
-          KYRON_PANTRY_SIGNER_PROFILE: repository-v1
-          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_REPOSITORY_BOOTSTRAP_PRIVATE_PEM }}
-          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_REPOSITORY_CONTENT_PRIVATE_PEM }}
+          KYRON_PANTRY_SIGNER_PROFILE: local-machine-v1
         run: |
           $ErrorActionPreference='Stop'
-          $missingSigning=@('KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM','KYRON_CONTENT_PRIVATE_PEM')|Where-Object{[string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_))}
-          if($missingSigning.Count){throw "repository-v1 signing secret unavailable: $($missingSigning-join',')"}
           $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
           $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=launcher-publish-only sha256=$recipeSha"
@@ -171,3 +170,7 @@ jobs:
           $metaPath='./source/security/signing/canonical-signer.json'
           if(Test-Path -LiteralPath $metaPath -PathType Leaf){$meta=Get-Content -LiteralPath $metaPath -Raw|ConvertFrom-Json;$thumb=([string]$meta.thumbprint_sha1-replace'\s','').ToUpperInvariant();foreach($storeName in @('TrustedPublisher','Root')){& certutil.exe -delstore $storeName $thumb|Out-Null}}
           foreach($leaf in @('kyron-canonical.cer','kyron-canonical.pfx')){$path=Join-Path $env:RUNNER_TEMP $leaf;if(Test-Path -LiteralPath $path -PathType Leaf){[IO.File]::WriteAllBytes($path,(New-Object byte[] ((Get-Item -LiteralPath $path).Length)));Remove-Item -LiteralPath $path -Force}}
+          . .\source\scripts\workspace-common.ps1
+          $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1'
+          foreach($name in @('bootstrap_root_private.pem','content_private.pem')){$q=Join-Path $root $name;if(Test-Path -LiteralPath $q -PathType Leaf){[IO.File]::WriteAllBytes($q,(New-Object byte[] ((Get-Item -LiteralPath $q).Length)))}}
+          if(Test-Path -LiteralPath $root -PathType Container){Remove-Item -LiteralPath $root -Recurse -Force}
