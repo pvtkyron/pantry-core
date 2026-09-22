@@ -152,6 +152,8 @@ jobs:
         run: |
           $log=Join-Path $env:RUNNER_TEMP 'workspace-release.log'
           try{
+            $missingSigning=@('KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM','KYRON_CONTENT_PRIVATE_PEM')|Where-Object{[string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_))}
+            if($missingSigning.Count){throw "hosted repository signing input missing: $($missingSigning-join',')"}
             $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
             $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
             Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=prepare-only sha256=$recipeSha"
@@ -161,6 +163,11 @@ jobs:
             if($LASTEXITCODE){throw 'Canonical Workspace/Pantry release runner rejected prepare-only mode'}
             Write-Host '[PROJECT/WORKSPACE][OK]'
           }catch{
+            $detail=[string]$_.Exception.Message
+            if(Test-Path $log){$candidate=@(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue|Where-Object{$_ -match '(?i)(error|fail|missing|unavailable|rejected|stale|dirty|requires|moved|not found)'}|Select-Object -Last 1);if($candidate.Count){$detail=[string]$candidate[0]}}
+            $detail=($detail-replace'[A-Za-z0-9+/=]{80,}','[redacted]').Trim();if($detail.Length-gt500){$detail=$detail.Substring(0,500)}
+            $safe=$detail.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Host "::error title=Canonical Pantry runner::$safe"
             $phase='canonical-runner'
             Write-Host "[PROJECT/WORKSPACE][FAIL] phase=$phase"
             exit 1
