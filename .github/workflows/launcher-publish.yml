@@ -65,8 +65,8 @@ jobs:
       - name: Materialize canonical code signer
         shell: pwsh
         env:
-          KYRON_CODESIGN_PFX_BASE64: ${{ secrets.KYRON_CODESIGN_PFX_BASE64 }}
-          KYRON_CODESIGN_PASSWORD_SECRET: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+          KYRON_CODESIGN_PFX_BASE64: ${{ secrets[vars.TIN_NAME] }}
+          KYRON_CODESIGN_PASSWORD_SECRET: ${{ secrets[vars.PIN_NAME] }}
         run: |
           $ErrorActionPreference='Stop'
           if([string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PFX_BASE64)){Write-Host '::error title=Canonical code signer::canonical signing secret unavailable: KYRON_CODESIGN_PFX_BASE64';throw 'canonical signing secret unavailable: KYRON_CODESIGN_PFX_BASE64'}
@@ -123,7 +123,7 @@ jobs:
         shell: pwsh
         env:
           KYRON_CODESIGN_PFX: ${{ runner.temp }}\kyron-canonical.pfx
-          KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+          KYRON_CODESIGN_PASSWORD: ${{ secrets[vars.PIN_NAME] }}
           KYRON_PANTRY_SIGNER_PROFILE: repository-v1
           KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets[vars.CREAM_A_NAME] }}
           KYRON_CONTENT_PRIVATE_PEM: ${{ secrets[vars.JAM_A_NAME] }}
