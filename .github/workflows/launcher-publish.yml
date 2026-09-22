@@ -65,7 +65,7 @@ jobs:
       - name: Materialize canonical code signer
         shell: pwsh
         env:
-          KYRON_CODESIGN_PFX_BASE64: ${{ secrets.KYRON_CODESIGN_PFX_BASE64 }}
+          KYRON_CODESIGN_PFX_BASE64: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
           KYRON_CODESIGN_PASSWORD_SECRET: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
         run: |
           $ErrorActionPreference='Stop'
