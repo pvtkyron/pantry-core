@@ -91,8 +91,8 @@ jobs:
             $modSha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($mod)).ToLowerInvariant()
             if($modSha-ne([string]$meta.public_modulus_sha256).ToLowerInvariant()){Write-Host '::error title=Canonical code signer::canonical signing public modulus mismatch';throw 'canonical signing public modulus mismatch'}
             $cer=Join-Path $env:RUNNER_TEMP 'kyron-canonical.cer';[IO.File]::WriteAllBytes($cer,$cert.RawData)
-            foreach($storeName in @('Root','TrustedPublisher')){& certutil.exe -user -f -addstore $storeName $cer|Out-Host;if($LASTEXITCODE){throw "canonical signer trust import failed: $storeName rc=$LASTEXITCODE"}}
-            Write-Host "[SIGNING/CANONICAL][OK] certificate_sha256=$sha trust=CurrentUser"
+            foreach($storeName in @('Root','TrustedPublisher')){& certutil.exe -f -addstore $storeName $cer|Out-Host;if($LASTEXITCODE){throw "canonical signer trust import failed: $storeName rc=$LASTEXITCODE"}}
+            Write-Host "[SIGNING/CANONICAL][OK] certificate_sha256=$sha trust=LocalMachine"
           }finally{
             if($null-ne$rsa){$rsa.Dispose()}
             $cert.Dispose()
@@ -153,5 +153,5 @@ jobs:
         shell: pwsh
         run: |
           $metaPath='./source/security/signing/canonical-signer.json'
-          if(Test-Path -LiteralPath $metaPath -PathType Leaf){$meta=Get-Content -LiteralPath $metaPath -Raw|ConvertFrom-Json;$thumb=([string]$meta.thumbprint_sha1-replace'\s','').ToUpperInvariant();foreach($storeName in @('TrustedPublisher','Root')){& certutil.exe -user -delstore $storeName $thumb|Out-Null}}
+          if(Test-Path -LiteralPath $metaPath -PathType Leaf){$meta=Get-Content -LiteralPath $metaPath -Raw|ConvertFrom-Json;$thumb=([string]$meta.thumbprint_sha1-replace'\s','').ToUpperInvariant();foreach($storeName in @('TrustedPublisher','Root')){& certutil.exe -delstore $storeName $thumb|Out-Null}}
           foreach($leaf in @('kyron-canonical.cer','kyron-canonical.pfx')){$path=Join-Path $env:RUNNER_TEMP $leaf;if(Test-Path -LiteralPath $path -PathType Leaf){[IO.File]::WriteAllBytes($path,(New-Object byte[] ((Get-Item -LiteralPath $path).Length)));Remove-Item -LiteralPath $path -Force}}
