@@ -108,7 +108,8 @@ jobs:
           [IO.File]::WriteAllBytes($pfx,$raw)
           $meta=Get-Content -LiteralPath './source/security/signing/canonical-signer.json' -Raw|ConvertFrom-Json
           $flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
-          try{$cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$env:KYRON_CODESIGN_PASSWORD_SECRET,$flags)}catch{Write-Host '::error title=Canonical code signer::canonical signing PFX could not be opened';throw 'canonical signing PFX could not be opened'}
+          $signingPassword=$env:KYRON_CODESIGN_PASSWORD_SECRET.TrimEnd([char[]]"`r`n")
+          try{$cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$signingPassword,$flags)}catch{Write-Host '::error title=Canonical code signer::canonical signing PFX could not be opened';throw 'canonical signing PFX could not be opened'}
           try{
             if(!$cert.HasPrivateKey){Write-Host '::error title=Canonical code signer::canonical signing PFX has no private key';throw 'canonical signing PFX has no private key'}
             $sha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($cert.RawData)).ToLowerInvariant()
