@@ -14,6 +14,11 @@ on:
           - both
           - release
           - insider
+      include_launcher:
+        description: Also rebuild Launcher (requires canonical PFX secret)
+        required: false
+        default: false
+        type: boolean
   repository_dispatch:
     types: [fresh-batch]
   schedule:
@@ -70,6 +75,7 @@ jobs:
     with:
       capsule: ${{ needs.sources.outputs.capsule }}
       runtime_channel: ${{ inputs.runtime_channel || 'both' }}
+      include_launcher: ${{ inputs.include_launcher == true }}
     secrets: inherit
 
   doctor:
@@ -100,4 +106,5 @@ jobs:
     with:
       capsule: ${{ needs.workspace.outputs.delivery_capsule }}
       runtime_channel: ${{ inputs.runtime_channel || 'both' }}
+      include_launcher: ${{ inputs.include_launcher == true }}
     secrets: inherit

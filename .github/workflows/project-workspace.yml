@@ -10,6 +10,10 @@ on:
         required: false
         default: both
         type: string
+      include_launcher:
+        required: false
+        default: false
+        type: boolean
     outputs:
       delivery_capsule:
         description: Encrypted private delivery state
@@ -94,6 +98,7 @@ jobs:
           }
 
       - name: Materialize canonical code signer
+        if: ${{ inputs.include_launcher == true }}
         shell: pwsh
         env:
           KYRON_CODESIGN_PFX_BASE64: ${{ secrets[vars.TIN_NAME] }}
@@ -150,7 +155,9 @@ jobs:
             $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
             $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
             Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=prepare-only sha256=$recipeSha"
-            & $recipe -PantryPath (Join-Path $PWD.Path 'filling') -PantryCorePath (Join-Path $PWD.Path 'shelf') -RunId ([long]'${{ github.run_id }}') -RunAttempt ([int]'${{ github.run_attempt }}') -RuntimeChannel '${{ inputs.runtime_channel }}' -ArtifactPlan both -IncludeLauncher -PrepareOnly *>&1 | Set-Content -LiteralPath $log
+            $releaseArgs=@('-PantryPath',(Join-Path $PWD.Path 'filling'),'-PantryCorePath',(Join-Path $PWD.Path 'shelf'),'-RunId',[string][long]'${{ github.run_id }}','-RunAttempt',[string][int]'${{ github.run_attempt }}','-RuntimeChannel','${{ inputs.runtime_channel }}','-PrepareOnly')
+            if('${{ inputs.include_launcher }}'-eq'true'){$releaseArgs+='-IncludeLauncher'}
+            & $recipe @releaseArgs *>&1 | Set-Content -LiteralPath $log
             if($LASTEXITCODE){throw 'Canonical Workspace/Pantry release runner rejected prepare-only mode'}
             Write-Host '[PROJECT/WORKSPACE][OK]'
           }catch{
