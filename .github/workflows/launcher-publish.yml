@@ -62,6 +62,40 @@ jobs:
             if($LASTEXITCODE){throw "release main binding rejected: $repo"}
           }
 
+      - name: Materialize canonical code signer
+        shell: pwsh
+        env:
+          KYRON_CODESIGN_PFX_BASE64: ${{ secrets.KYRON_CODESIGN_PFX_BASE64 }}
+          KYRON_CODESIGN_PASSWORD_SECRET: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PFX_BASE64)){throw 'canonical signing secret unavailable: KYRON_CODESIGN_PFX_BASE64'}
+          if([string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PASSWORD_SECRET)){throw 'canonical signing secret unavailable: KYRON_CODESIGN_PASSWORD'}
+          Write-Host "::add-mask::$($env:KYRON_CODESIGN_PFX_BASE64)"
+          Write-Host "::add-mask::$($env:KYRON_CODESIGN_PASSWORD_SECRET)"
+          $pfx=Join-Path $env:RUNNER_TEMP 'kyron-canonical.pfx'
+          try{$raw=[Convert]::FromBase64String($env:KYRON_CODESIGN_PFX_BASE64)}catch{throw 'canonical signing PFX base64 is invalid'}
+          [IO.File]::WriteAllBytes($pfx,$raw)
+          $meta=Get-Content -LiteralPath './source/security/signing/canonical-signer.json' -Raw|ConvertFrom-Json
+          $flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+          try{$cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$env:KYRON_CODESIGN_PASSWORD_SECRET,$flags)}catch{throw 'canonical signing PFX could not be opened'}
+          try{
+            if(!$cert.HasPrivateKey){throw 'canonical signing PFX has no private key'}
+            $sha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($cert.RawData)).ToLowerInvariant()
+            if($sha-ne([string]$meta.certificate_sha256).ToLowerInvariant()){throw 'canonical signing certificate SHA-256 mismatch'}
+            if(($cert.Thumbprint-replace'\s','').ToLowerInvariant()-ne([string]$meta.thumbprint_sha1).ToLowerInvariant()){throw 'canonical signing certificate SHA-1 mismatch'}
+            $rsa=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($cert)
+            if($null-eq$rsa-or$rsa.KeySize-ne2048){throw 'canonical signing certificate RSA key mismatch'}
+            $mod=$rsa.ExportParameters($false).Modulus
+            $modSha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($mod)).ToLowerInvariant()
+            if($modSha-ne([string]$meta.public_modulus_sha256).ToLowerInvariant()){throw 'canonical signing public modulus mismatch'}
+            Write-Host "[SIGNING/CANONICAL][OK] certificate_sha256=$sha"
+          }finally{
+            if($null-ne$rsa){$rsa.Dispose()}
+            $cert.Dispose()
+            [Security.Cryptography.CryptographicOperations]::ZeroMemory($raw)
+          }
+
       - name: Chill Workspace toolchains
         uses: actions/cache@v6.1.0
         with:
@@ -69,7 +103,8 @@ jobs:
             *-sdk/Android
             *-sdk/Java
             *-sdk/Smali
-          key: workspace-toolchains-v6-${{ runner.os }}
+            *-sdk/LLVMMinGW
+          key: workspace-toolchains-v7-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
 
       - name: Chill publisher Python
         uses: actions/cache@v6.1.0
@@ -77,9 +112,18 @@ jobs:
           path: '*-sdk/Python'
           key: pantry-publisher-python-v3-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
 
+      - name: Ensure canonical Workspace toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\source\scripts\ensure-workspace-toolchain.ps1
+          if(!$?){throw 'Canonical Workspace toolchain bootstrap failed'}
+
       - name: Publish launcher Pantry Core
         shell: pwsh
         env:
+          KYRON_CODESIGN_PFX: ${{ runner.temp }}\kyron-canonical.pfx
+          KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
           KYRON_PANTRY_SIGNER_PROFILE: repository-v1
           KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets[vars.CREAM_A_NAME] }}
           KYRON_CONTENT_PRIVATE_PEM: ${{ secrets[vars.JAM_A_NAME] }}
@@ -100,3 +144,13 @@ jobs:
           }
           if($code){Write-Host ('::error title=Launcher Pantry Core publication rejected::Canonical runner exit code {0}' -f $code);exit $code}
           Write-Host '[PANTRY/LAUNCHER-PUBLISH][OK]'
+
+      - name: Remove ephemeral canonical signer
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $pfx=Join-Path $env:RUNNER_TEMP 'kyron-canonical.pfx'
+          if(Test-Path -LiteralPath $pfx -PathType Leaf){
+            [IO.File]::WriteAllBytes($pfx,(New-Object byte[] ((Get-Item -LiteralPath $pfx).Length)))
+            Remove-Item -LiteralPath $pfx -Force
+          }
