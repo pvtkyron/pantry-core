@@ -5,11 +5,15 @@ name: Kyron Sequential Source Pipeline
 on:
   workflow_dispatch:
     inputs:
-      bootstrap_rotation:
-        description: Intentionally rebuild and publish Bootstrap
-        required: false
-        default: false
-        type: boolean
+      runtime_channel:
+        description: Runtime channel to compile and publish
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - release
+          - insider
   repository_dispatch:
     types: [fresh-batch]
   schedule:
@@ -65,7 +69,7 @@ jobs:
     uses: ./.github/workflows/project-workspace.yml
     with:
       capsule: ${{ needs.sources.outputs.capsule }}
-      bootstrap_rotation: ${{ inputs.bootstrap_rotation == true }}
+      runtime_channel: ${{ inputs.runtime_channel || 'both' }}
     secrets: inherit
 
   doctor:
@@ -95,4 +99,5 @@ jobs:
     uses: ./.github/workflows/box.yml
     with:
       capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+      runtime_channel: ${{ inputs.runtime_channel || 'both' }}
     secrets: inherit

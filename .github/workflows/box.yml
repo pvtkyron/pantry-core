@@ -6,6 +6,10 @@ on:
       capsule:
         required: true
         type: string
+      runtime_channel:
+        required: false
+        default: both
+        type: string
 
 permissions:
   contents: write
@@ -44,7 +48,7 @@ jobs:
           path: source
           fetch-depth: 1
           fetch-tags: false
-          persist-credentials: false
+          persist-credentials: true
           show-progress: false
 
       - name: Open private Pantry delivery
@@ -68,6 +72,29 @@ jobs:
           persist-credentials: true
           show-progress: false
 
+      - name: Bind canonical release branches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($repo in @('source','filling','shelf')){
+            & git -C $repo fetch --quiet --prune origin main
+            if($LASTEXITCODE){throw "release branch refresh rejected: $repo"}
+            $head=(& git -C $repo rev-parse HEAD).Trim().ToLowerInvariant()
+            $remote=(& git -C $repo rev-parse refs/remotes/origin/main).Trim().ToLowerInvariant()
+            if($head-ne$remote){throw "release source moved before publish: $repo"}
+            & git -C $repo checkout -q -B main $head
+            if($LASTEXITCODE){throw "release main binding rejected: $repo"}
+          }
+
+      - name: Chill Workspace toolchains
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            *-sdk/Android
+            *-sdk/Java
+            *-sdk/Smali
+          key: workspace-toolchains-v6-${{ runner.os }}
+
       - name: Chill publisher Python
         uses: actions/cache@v6.1.0
         with:
@@ -77,31 +104,20 @@ jobs:
       - name: Prepare and publish quietly
         shell: pwsh
         env:
-          CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
-          CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
-          JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
-          JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
-          TIN: ${{ secrets[vars.TIN_NAME] }}
-          PIN: ${{ secrets[vars.PIN_NAME] }}
+          KYRON_PANTRY_SIGNER_PROFILE: repository-v1
+          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets[vars.CREAM_A_NAME] }}
+          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets[vars.JAM_A_NAME] }}
         run: |
           $log=Join-Path $env:RUNNER_TEMP 'pantry-publish.log'
           try{
-            $a=@{
-              Fill=(Join-Path $PWD.Path 'filling')
-              Shelf=(Join-Path $PWD.Path 'shelf')
-              Slice='Box'
-              Batch=[long]'${{ github.run_id }}'
-              Try=[int]'${{ github.run_attempt }}'
-            }
-            & ./source/Tools/BakeSlice.ps1 @a *>&1 | Set-Content -LiteralPath $log
-            if($LASTEXITCODE){throw 'Pantry Core publication rejected'}
+            $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
+            $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=publish sha256=$recipeSha"
+            & $recipe -PantryPath (Join-Path $PWD.Path 'filling') -PantryCorePath (Join-Path $PWD.Path 'shelf') -RunId ([long]'${{ github.run_id }}') -RunAttempt ([int]'${{ github.run_attempt }}') -RuntimeChannel '${{ inputs.runtime_channel }}' -ArtifactPlan both -IncludeLauncher -SkipArtifactPromotion *>&1 | Set-Content -LiteralPath $log
+            if($LASTEXITCODE){throw 'Canonical Workspace/Pantry release runner rejected publish mode'}
             Write-Host '[PANTRY/PUBLISH][OK] private Pantry prepared and public Core published'
           }catch{
-            $phase='unknown'
-            if(Test-Path $log){
-              $m=[regex]::Match((Get-Content -LiteralPath $log -Raw),'(?m)^\[Patisserie\]\[FAIL\] phase=([a-z0-9-]{1,64})')
-              if($m.Success){$phase=$m.Groups[1].Value}
-            }
+            $phase='canonical-runner'
             Write-Host "[PANTRY/PUBLISH][FAIL] phase=$phase"
             exit 1
           }finally{

@@ -6,10 +6,10 @@ on:
       capsule:
         required: true
         type: string
-      bootstrap_rotation:
+      runtime_channel:
         required: false
-        default: false
-        type: boolean
+        default: both
+        type: string
     outputs:
       delivery_capsule:
         description: Encrypted private delivery state
@@ -31,7 +31,6 @@ jobs:
       KYRON_MSBUILD_TIMEOUT_SECONDS: '1200'
       KYRON_SLICE_TIMEOUT_SECONDS: '3600'
       KYRON_HEARTBEAT_SECONDS: '30'
-      KYRON_BOOTSTRAP_ROTATION: ${{ inputs.bootstrap_rotation && '1' || '0' }}
     steps:
       - name: Open capsule helper
         uses: actions/checkout@v6
@@ -61,7 +60,7 @@ jobs:
           path: source
           fetch-depth: 1
           fetch-tags: false
-          persist-credentials: false
+          persist-credentials: true
           show-progress: false
 
       - name: Open pinned Pantry
@@ -75,6 +74,29 @@ jobs:
           fetch-tags: false
           persist-credentials: true
           show-progress: false
+
+      - name: Open Pantry Core publish base
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: shelf
+          fetch-depth: 1
+          persist-credentials: true
+          show-progress: false
+
+      - name: Bind canonical release branches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($repo in @('source','filling','shelf')){
+            & git -C $repo fetch --quiet --prune origin main
+            if($LASTEXITCODE){throw "release branch refresh rejected: $repo"}
+            $head=(& git -C $repo rev-parse HEAD).Trim().ToLowerInvariant()
+            $remote=(& git -C $repo rev-parse refs/remotes/origin/main).Trim().ToLowerInvariant()
+            if($head-ne$remote){throw "release source moved before build: $repo"}
+            & git -C $repo checkout -q -B main $head
+            if($LASTEXITCODE){throw "release main binding rejected: $repo"}
+          }
 
       - name: Materialize canonical code signer
         shell: pwsh
@@ -122,26 +144,22 @@ jobs:
       - name: Build and stage Pantry quietly
         shell: pwsh
         env:
-          CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
-          CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
-          JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
-          JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
-          TIN: ${{ secrets[vars.TIN_NAME] }}
-          PIN: ${{ secrets[vars.PIN_NAME] }}
           KYRON_CODESIGN_PFX: ${{ runner.temp }}\kyron-canonical.pfx
           KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+          KYRON_PANTRY_SIGNER_PROFILE: repository-v1
+          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets[vars.CREAM_A_NAME] }}
+          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets[vars.JAM_A_NAME] }}
         run: |
           $log=Join-Path $env:RUNNER_TEMP 'workspace-release.log'
           try{
-            & ./source/PantryPublisher/Invoke-PantryReleaseRecipe.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -RunId ([long]'${{ github.run_id }}') -RunAttempt ([int]'${{ github.run_attempt }}') *>&1 | Set-Content -LiteralPath $log
-            if($LASTEXITCODE){throw 'Workspace release recipe rejected'}
+            $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
+            $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=prepare-only sha256=$recipeSha"
+            & $recipe -PantryPath (Join-Path $PWD.Path 'filling') -PantryCorePath (Join-Path $PWD.Path 'shelf') -RunId ([long]'${{ github.run_id }}') -RunAttempt ([int]'${{ github.run_attempt }}') -RuntimeChannel '${{ inputs.runtime_channel }}' -ArtifactPlan both -IncludeLauncher -PrepareOnly *>&1 | Set-Content -LiteralPath $log
+            if($LASTEXITCODE){throw 'Canonical Workspace/Pantry release runner rejected prepare-only mode'}
             Write-Host '[PROJECT/WORKSPACE][OK]'
           }catch{
-            $phase='unknown'
-            if(Test-Path $log){
-              $m=[regex]::Match((Get-Content -LiteralPath $log -Raw),'(?m)^\[Patisserie\]\[FAIL\] phase=([a-z0-9-]{1,64})')
-              if($m.Success){$phase=$m.Groups[1].Value}
-            }
+            $phase='canonical-runner'
             Write-Host "[PROJECT/WORKSPACE][FAIL] phase=$phase"
             exit 1
           }finally{
