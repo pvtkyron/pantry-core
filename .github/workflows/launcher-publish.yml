@@ -1,0 +1,93 @@
+name: Launcher Pantry Core Publish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/launcher-publish.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: launcher-pantry-core-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish repository-trust launcher content
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - name: Open Pantry Core publish target
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: shelf
+          fetch-depth: 1
+          persist-credentials: true
+          show-progress: false
+
+      - name: Open canonical Workspace
+        uses: actions/checkout@v6
+        with:
+          repository: pvtkyron/Workspace
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: source
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+
+      - name: Open canonical Pantry
+        uses: actions/checkout@v6
+        with:
+          repository: pvtkyron/pantry
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: main
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+
+      - name: Bind canonical release branches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($repo in @('source','filling','shelf')){
+            & git -C $repo checkout -q -B main HEAD
+            if($LASTEXITCODE){throw "release main binding rejected: $repo"}
+          }
+
+      - name: Chill Workspace toolchains
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            *-sdk/Android
+            *-sdk/Java
+            *-sdk/Smali
+          key: workspace-toolchains-v6-${{ runner.os }}
+
+      - name: Chill publisher Python
+        uses: actions/cache@v6.1.0
+        with:
+          path: '*-sdk/Python'
+          key: pantry-publisher-python-v3-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
+
+      - name: Publish launcher Pantry Core
+        shell: pwsh
+        env:
+          KYRON_PANTRY_SIGNER_PROFILE: repository-v1
+          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets[vars.CREAM_A_NAME] }}
+          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets[vars.JAM_A_NAME] }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
+          $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=launcher-publish-only sha256=$recipeSha"
+          & $recipe -PantryPath (Join-Path $PWD.Path 'filling') -PantryCorePath (Join-Path $PWD.Path 'shelf') -RunId ([long]'${{ github.run_id }}') -RunAttempt ([int]'${{ github.run_attempt }}') -RuntimeChannel both -ArtifactPlan launcher -IncludeLauncher -SkipArtifactPromotion
+          if($LASTEXITCODE){throw 'Launcher Pantry Core publication rejected'}
+          Write-Host '[PANTRY/LAUNCHER-PUBLISH][OK]'
