@@ -1,4 +1,5 @@
 name: Kyron Sequential Source Pipeline
+run-name: "Kyron ${{ inputs.runtime_channel || 'both' }} / launcher=${{ inputs.include_launcher || false }} / ${{ github.event_name }}"
 # Public orchestration carries only encrypted private source state.
 # Pipeline generation: 3
 
