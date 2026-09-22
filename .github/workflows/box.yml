@@ -23,6 +23,13 @@ jobs:
     name: Prepare and publish Pantry Core
     runs-on: windows-2025
     timeout-minutes: 45
+    env:
+      ANDROID_HOME: ''
+      ANDROID_SDK_ROOT: ''
+      ANDROID_NDK_HOME: ''
+      ANDROID_NDK_ROOT: ''
+      NDK_ROOT: ''
+      JAVA_HOME: ''
     steps:
       - name: Open capsule helper
         uses: actions/checkout@v6
