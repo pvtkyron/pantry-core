@@ -118,7 +118,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $root|Out-Null
           $utf8=[Text.UTF8Encoding]::new($false)
           foreach($x in @(@('bootstrap_root_private.pem','CREAM_A'),@('bootstrap_root_public.pem','CREAM_B'),@('content_private.pem','JAM_A'),@('content_public.pem','JAM_B'))){[IO.File]::WriteAllText((Join-Path $root $x[0]),([Environment]::GetEnvironmentVariable($x[1])).Trim()+"`n",$utf8)}
-          & .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -Workspace (Join-Path $PWD.Path 'source') -ExpectedProfile local-machine-v1 -RequireExistingIdentity|Out-Null
+          & .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -Workspace (Join-Path $PWD.Path 'source') -ExpectedProfile local-machine-v1 -Ephemeral -RequireExistingIdentity|Out-Null
           if(!$?){throw 'Canonical local Pantry signer validation failed'}
       - name: Materialize canonical code signer
         shell: pwsh
