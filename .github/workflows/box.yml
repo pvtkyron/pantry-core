@@ -99,13 +99,21 @@ jobs:
             *-sdk/Android
             *-sdk/Java
             *-sdk/Smali
-          key: workspace-toolchains-v6-${{ runner.os }}
+            *-sdk/LLVMMinGW
+          key: workspace-toolchains-v7-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
 
       - name: Chill publisher Python
         uses: actions/cache@v6.1.0
         with:
           path: '*-sdk/Python'
           key: pantry-publisher-python-v3-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
+
+      - name: Ensure canonical Workspace toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\source\scripts\ensure-workspace-toolchain.ps1
+          if(!$?){throw 'Canonical Workspace toolchain bootstrap failed'}
 
       - name: Prepare and publish quietly
         shell: pwsh
@@ -126,7 +134,7 @@ jobs:
             Write-Host '[PANTRY/PUBLISH][OK] private Pantry prepared and public Core published'
           }catch{
             $detail=[string]$_.Exception.Message
-            if(Test-Path $log){$candidate=@(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue|Where-Object{$_ -match '(?i)(error|fail|missing|unavailable|rejected|stale|dirty|requires|moved|not found)' -and $_ -notmatch '(?i)\[PANTRY\]\[(?:ACTION|ATTEMPT|RECIPE)\]|\[(?:PROJECT/WORKSPACE|PANTRY/PUBLISH)\]\[FAIL\]|Canonical .* rejected|Process completed with exit code'}|Select-Object -Last 1);if($candidate.Count){$detail=[string]$candidate[0]}}
+            if(Test-Path $log){$lines=@(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue);$candidate=@($lines|Where-Object{$_ -match '(?i)(\[(?:PUBGM|KYRON|ANDROID|TOOLCHAIN|WINDOWS)[^\r\n]*\[(?:ERROR|E)\]|fatal error:|make:\s*\*\*\*|ndk-build.*(?:error|fail))'}|Select-Object -Last 1);if(!$candidate.Count){$candidate=@($lines|Where-Object{$_ -match '(?i)(error|fail|missing|unavailable|rejected|stale|dirty|requires|moved|not found)' -and $_ -notmatch '(?i)\[PANTRY\]\[(?:ACTION|ATTEMPT|RECIPE)\]|\[(?:PROJECT/WORKSPACE|PANTRY/PUBLISH)\]\[FAIL\]|Canonical .* rejected|Process completed with exit code'}|Select-Object -Last 1)};if($candidate.Count){$detail=[string]$candidate[0]}}
             $detail=($detail-replace'[A-Za-z0-9+/=]{80,}','[redacted]').Trim();if($detail.Length-gt500){$detail=$detail.Substring(0,500)}
             $safe=$detail.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
             Write-Host "::error title=Canonical Pantry runner::$safe"
