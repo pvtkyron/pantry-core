@@ -103,6 +103,23 @@ jobs:
             if($LASTEXITCODE){throw "release main binding rejected: $repo"}
           }
 
+      - name: Materialize canonical Pantry signer
+        shell: pwsh
+        env:
+          CREAM_A: ${{ secrets[vars.CREAM_A_NAME] }}
+          CREAM_B: ${{ secrets[vars.CREAM_B_NAME] }}
+          JAM_A: ${{ secrets[vars.JAM_A_NAME] }}
+          JAM_B: ${{ secrets[vars.JAM_B_NAME] }}
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($n in @('CREAM_A','CREAM_B','JAM_A','JAM_B')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical local Pantry signer input missing: $n"}}
+          . .\source\scripts\workspace-common.ps1
+          $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1'
+          New-Item -ItemType Directory -Force -Path $root|Out-Null
+          $utf8=[Text.UTF8Encoding]::new($false)
+          foreach($x in @(@('bootstrap_root_private.pem','CREAM_A'),@('bootstrap_root_public.pem','CREAM_B'),@('content_private.pem','JAM_A'),@('content_public.pem','JAM_B'))){[IO.File]::WriteAllText((Join-Path $root $x[0]),([Environment]::GetEnvironmentVariable($x[1])).Trim()+"`n",$utf8)}
+          & .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -Workspace (Join-Path $PWD.Path 'source') -ExpectedProfile local-machine-v1 -RequireExistingIdentity|Out-Null
+          if(!$?){throw 'Canonical local Pantry signer validation failed'}
       - name: Materialize canonical code signer
         shell: pwsh
         env:
@@ -160,14 +177,14 @@ jobs:
         env:
           KYRON_CODESIGN_PFX: ${{ runner.temp }}\kyron-canonical.pfx
           KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
-          KYRON_PANTRY_SIGNER_PROFILE: repository-v1
-          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets[vars.CREAM_A_NAME] }}
-          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets[vars.JAM_A_NAME] }}
+          KYRON_PANTRY_SIGNER_PROFILE: local-machine-v1
         run: |
           $log=Join-Path $env:RUNNER_TEMP 'workspace-release.log'
           try{
-            $missingSigning=@('KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM','KYRON_CONTENT_PRIVATE_PEM')|Where-Object{[string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_))}
-            if($missingSigning.Count){throw "hosted repository signing input missing: $($missingSigning-join',')"}
+            . .\source\scripts\workspace-common.ps1
+            $signerRoot=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1'
+            $missingSigning=@('bootstrap_root_private.pem','bootstrap_root_public.pem','content_private.pem','content_public.pem')|Where-Object{!(Test-Path -LiteralPath (Join-Path $signerRoot $_) -PathType Leaf)}
+            if($missingSigning.Count){throw "hosted canonical local signer state missing: $($missingSigning-join',')"}
             $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
             $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
             Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=prepare+publish sha256=$recipeSha"
@@ -189,15 +206,16 @@ jobs:
             if(Test-Path $log){Remove-Item $log -Force -ErrorAction SilentlyContinue}
           }
 
-      - name: Remove ephemeral canonical signer
+      - name: Remove ephemeral signing material
         if: ${{ always() }}
         shell: pwsh
         run: |
           $pfx=Join-Path $env:RUNNER_TEMP 'kyron-canonical.pfx'
-          if(Test-Path -LiteralPath $pfx -PathType Leaf){
-            [IO.File]::WriteAllBytes($pfx,(New-Object byte[] ((Get-Item -LiteralPath $pfx).Length)))
-            Remove-Item -LiteralPath $pfx -Force
-          }
+          if(Test-Path -LiteralPath $pfx -PathType Leaf){[IO.File]::WriteAllBytes($pfx,(New-Object byte[] ((Get-Item -LiteralPath $pfx).Length)));Remove-Item -LiteralPath $pfx -Force}
+          . .\source\scripts\workspace-common.ps1
+          $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1'
+          foreach($name in @('bootstrap_root_private.pem','content_private.pem')){$q=Join-Path $root $name;if(Test-Path -LiteralPath $q -PathType Leaf){[IO.File]::WriteAllBytes($q,(New-Object byte[] ((Get-Item -LiteralPath $q).Length)))}}
+          if(Test-Path -LiteralPath $root -PathType Container){Remove-Item -LiteralPath $root -Recurse -Force}
 
       - name: Pin private Pantry delivery
         id: delivery
