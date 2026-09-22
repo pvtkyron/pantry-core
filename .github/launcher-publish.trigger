@@ -1,4 +1,4 @@
 schema=1
-workspace=f323b75ad6f9a588fd797120cdf3dabf0a2267cc
 pantry=e3556a8845e0006e910b432d2ebb24240cc77943
+workspace=f323b75ad6f9a588fd797120cdf3dabf0a2267cc
 launcher=2ee1b84da22f9fcf6c11e417b7ffdbde0e2d7c566a12401e030abe79a598b478

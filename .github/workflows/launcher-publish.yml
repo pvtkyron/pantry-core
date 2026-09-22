@@ -88,6 +88,15 @@ jobs:
           $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
           $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=launcher-publish-only sha256=$recipeSha"
+          try {
           & $recipe -PantryPath (Join-Path $PWD.Path 'filling') -PantryCorePath (Join-Path $PWD.Path 'shelf') -RunId ([long]'${{ github.run_id }}') -RunAttempt ([int]'${{ github.run_attempt }}') -RuntimeChannel both -ArtifactPlan launcher -IncludeLauncher -SkipArtifactPromotion
-          if($LASTEXITCODE){throw 'Launcher Pantry Core publication rejected'}
+            $code=$LASTEXITCODE
+          } catch {
+            $msg=[regex]::Replace([string]$_.Exception.Message,'[\r\n]+',' ')
+            if($msg.Length -gt 800){$msg=$msg.Substring(0,800)}
+            $msg=$msg.Replace('%','%25')
+            Write-Host ('::error title=Launcher Pantry Core publication rejected::{0}' -f $msg)
+            throw
+          }
+          if($code){Write-Host ('::error title=Launcher Pantry Core publication rejected::Canonical runner exit code {0}' -f $code);exit $code}
           Write-Host '[PANTRY/LAUNCHER-PUBLISH][OK]'
