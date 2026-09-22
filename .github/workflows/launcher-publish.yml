@@ -90,7 +90,9 @@ jobs:
             $mod=$rsa.ExportParameters($false).Modulus
             $modSha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($mod)).ToLowerInvariant()
             if($modSha-ne([string]$meta.public_modulus_sha256).ToLowerInvariant()){Write-Host '::error title=Canonical code signer::canonical signing public modulus mismatch';throw 'canonical signing public modulus mismatch'}
-            Write-Host "[SIGNING/CANONICAL][OK] certificate_sha256=$sha"
+            $trustCert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.RawData)
+            try{foreach($storeName in @('Root','TrustedPublisher')){$store=[Security.Cryptography.X509Certificates.X509Store]::new($storeName,[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser);try{$store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite);$store.Add($trustCert)}finally{$store.Close()}}}finally{$trustCert.Dispose()}
+            Write-Host "[SIGNING/CANONICAL][OK] certificate_sha256=$sha trust=CurrentUser"
           }finally{
             if($null-ne$rsa){$rsa.Dispose()}
             $cert.Dispose()
@@ -150,6 +152,8 @@ jobs:
         if: ${{ always() }}
         shell: pwsh
         run: |
+          $metaPath='./source/security/signing/canonical-signer.json'
+          if(Test-Path -LiteralPath $metaPath -PathType Leaf){$meta=Get-Content -LiteralPath $metaPath -Raw|ConvertFrom-Json;$thumb=([string]$meta.thumbprint_sha1-replace'\s','').ToUpperInvariant();foreach($storeName in @('TrustedPublisher','Root')){$store=[Security.Cryptography.X509Certificates.X509Store]::new($storeName,[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser);try{$store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite);@($store.Certificates|Where-Object{($_.Thumbprint-replace'\s','').ToUpperInvariant()-eq$thumb})|ForEach-Object{$store.Remove($_)}}finally{$store.Close()}}}
           $pfx=Join-Path $env:RUNNER_TEMP 'kyron-canonical.pfx'
           if(Test-Path -LiteralPath $pfx -PathType Leaf){
             [IO.File]::WriteAllBytes($pfx,(New-Object byte[] ((Get-Item -LiteralPath $pfx).Length)))
