@@ -34,7 +34,6 @@ on:
       - '.github/workflows/project-workspace.yml'
       - '.github/workflows/doctor.yml'
       - '.github/workflows/headless.yml'
-      - '.github/workflows/box.yml'
       - '.github/actions/private-capsule/**'
 
 permissions:
@@ -69,8 +68,10 @@ jobs:
     secrets: inherit
 
   workspace:
-    name: 4 · Workspace project
+    name: 4 · Workspace build + publish
     needs: [sources, web]
+    permissions:
+      contents: write
     if: ${{ needs.web.result == 'success' }}
     uses: ./.github/workflows/project-workspace.yml
     with:
@@ -89,23 +90,10 @@ jobs:
     secrets: inherit
 
   headless:
-    name: 6 · Runtime smoke
+    name: 6 · Post-publish runtime smoke
     needs: [workspace, doctor]
     if: ${{ needs.doctor.result == 'success' }}
     uses: ./.github/workflows/headless.yml
     with:
       capsule: ${{ needs.workspace.outputs.delivery_capsule }}
-    secrets: inherit
-
-  publish:
-    name: 7 · Pantry prepare + publish
-    needs: [workspace, headless]
-    if: ${{ needs.headless.result == 'success' }}
-    permissions:
-      contents: write
-    uses: ./.github/workflows/box.yml
-    with:
-      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
-      runtime_channel: ${{ inputs.runtime_channel || 'both' }}
-      include_launcher: ${{ inputs.include_launcher == true }}
     secrets: inherit

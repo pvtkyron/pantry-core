@@ -20,7 +20,7 @@ on:
         value: ${{ jobs.build.outputs.delivery_capsule }}
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -155,7 +155,7 @@ jobs:
           & .\source\scripts\ensure-workspace-toolchain.ps1
           if(!$?){throw 'Canonical Workspace toolchain bootstrap failed'}
 
-      - name: Build and stage Pantry quietly
+      - name: Build and publish Pantry quietly
         shell: pwsh
         env:
           KYRON_CODESIGN_PFX: ${{ runner.temp }}\kyron-canonical.pfx
@@ -170,15 +170,15 @@ jobs:
             if($missingSigning.Count){throw "hosted repository signing input missing: $($missingSigning-join',')"}
             $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
             $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
-            Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=prepare-only sha256=$recipeSha"
-            $releaseArgs=@{PantryPath=(Join-Path $PWD.Path 'filling');PantryCorePath=(Join-Path $PWD.Path 'shelf');RunId=[long]'${{ github.run_id }}';RunAttempt=[int]'${{ github.run_attempt }}';RuntimeChannel='${{ inputs.runtime_channel }}';PrepareOnly=$true}
+            Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=prepare+publish sha256=$recipeSha"
+            $releaseArgs=@{PantryPath=(Join-Path $PWD.Path 'filling');PantryCorePath=(Join-Path $PWD.Path 'shelf');RunId=[long]'${{ github.run_id }}';RunAttempt=[int]'${{ github.run_attempt }}';RuntimeChannel='${{ inputs.runtime_channel }}'}
             if('${{ inputs.include_launcher }}'-eq'true'){$releaseArgs.IncludeLauncher=$true}
             & $recipe @releaseArgs *>&1 | Set-Content -LiteralPath $log
-            if($LASTEXITCODE){throw 'Canonical Workspace/Pantry release runner rejected prepare-only mode'}
+            if($LASTEXITCODE){throw 'Canonical Workspace/Pantry release runner rejected one-shot publish mode'}
             Write-Host '[PROJECT/WORKSPACE][OK]'
           }catch{
             $detail=[string]$_.Exception.Message
-            if(Test-Path $log){$lines=@(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue);$structured='(?i)\[[A-Z0-9._/-]{2,48}\]\[(?:ERROR|E)\]';$candidate=@($lines|Where-Object{$_ -match $structured -and $_ -notmatch '(?i)command failed \(\d+\):' -and $_ -notmatch '(?i)\[PANTRY\]\[(?:ACTION|ATTEMPT|RECIPE)\]' -and $_ -notmatch '(?i)\[(?:PROJECT/WORKSPACE|PANTRY/PUBLISH)\]\[FAIL\]'}|Select-Object -Last 1);if(!$candidate.Count){$candidate=@($lines|Where-Object{$_ -match $structured}|Select-Object -Last 1)};if(!$candidate.Count){$candidate=@($lines|Where-Object{$_ -match '(?i)(fatal error:|make:\s*\*\*\*|ndk-build.*(?:error|fail))'}|Select-Object -Last 1)};if(!$candidate.Count){$candidate=@($lines|Where-Object{$_ -match '(?i)(error|fail|missing|unavailable|rejected|stale|dirty|requires|moved|not found)' -and $_ -notmatch '(?i)\[PANTRY\]\[(?:ACTION|ATTEMPT|RECIPE)\]|\[(?:PROJECT/WORKSPACE|PANTRY/PUBLISH)\]\[FAIL\]|Canonical .* rejected|Process completed with exit code|FullyQualifiedErrorId|CategoryInfo|^\s*At .+ line:\d+ char:'}|Select-Object -Last 1)};if($candidate.Count){$detail=[string]$candidate[0]}}
+            if(Test-Path $log){$lines=@(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue);$structured='(?i)\[[A-Z0-9._/-]{2,48}\]\[(?:ERROR|E)\]';$candidate=@($lines|Where-Object{$_ -match $structured -and $_ -notmatch '(?i)command failed \(\d+\):' -and $_ -notmatch '(?i)\[PANTRY\]\[(?:ACTION|ATTEMPT|RECIPE)\]' -and $_ -notmatch '(?i)\[(?:PROJECT/WORKSPACE|PANTRY/PUBLISH)\]\[FAIL\]'}|Select-Object -Last 1);if(!$candidate.Count){$candidate=@($lines|Where-Object{$_ -match '(?i)(fatal error:|make:\s*\*\*\*|ndk-build.*(?:error|fail))'}|Select-Object -Last 1)};if(!$candidate.Count){$candidate=@($lines|Where-Object{$_ -match '(?i)(error|fail|missing|unavailable|rejected|stale|dirty|requires|moved|not found|mismatch|invalid|cannot|could not|forbidden)' -and $_ -notmatch '(?i)\[PANTRY\]\[(?:ACTION|ATTEMPT|RECIPE)\]|\[(?:PROJECT/WORKSPACE|PANTRY/PUBLISH)\]\[FAIL\]|Canonical .* rejected|Process completed with exit code|Run-PantryRelease failed|prepare-(?:only|publish) failed errorlevel|command failed \(\d+\):|FullyQualifiedErrorId|CategoryInfo|^\s*At .+ line:\d+ char:'}|Select-Object -Last 1)};if($candidate.Count){$detail=[string]$candidate[0]}}
             $detail=($detail-replace'[A-Za-z0-9+/=]{80,}','[redacted]').Trim();if($detail.Length-gt500){$detail=$detail.Substring(0,500)}
             $safe=$detail.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
             Write-Host "::error title=Canonical Pantry runner::$safe"
