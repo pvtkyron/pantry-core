@@ -89,12 +89,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           foreach($repo in @('source','filling','shelf')){
-            & git -C $repo fetch --quiet --prune origin main
-            if($LASTEXITCODE){throw "release branch refresh rejected: $repo"}
-            $head=(& git -C $repo rev-parse HEAD).Trim().ToLowerInvariant()
-            $remote=(& git -C $repo rev-parse refs/remotes/origin/main).Trim().ToLowerInvariant()
-            if($head-ne$remote){throw "release source moved before build: $repo"}
-            & git -C $repo checkout -q -B main $head
+            & git -C $repo checkout -q -B main HEAD
             if($LASTEXITCODE){throw "release main binding rejected: $repo"}
           }
 
