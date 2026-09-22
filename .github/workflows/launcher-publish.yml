@@ -62,6 +62,20 @@ jobs:
             if($LASTEXITCODE){throw "release main binding rejected: $repo"}
           }
 
+      - name: Require repository Pantry signer
+        shell: pwsh
+        env:
+          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_REPOSITORY_BOOTSTRAP_PRIVATE_PEM }}
+          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_REPOSITORY_CONTENT_PRIVATE_PEM }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $missing=@('KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM','KYRON_CONTENT_PRIVATE_PEM')|Where-Object{[string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_))}
+          if($missing.Count){throw "repository-v1 signing secret unavailable: $($missing-join',')"}
+          function SpkiSha([string]$pem){$e=[Security.Cryptography.ECDsa]::Create();try{$e.ImportFromPem($pem);return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($e.ExportSubjectPublicKeyInfo())).ToLowerInvariant()}finally{$e.Dispose()}}
+          $bootstrapExpected=SpkiSha ([IO.File]::ReadAllText('./filling/security/keys/bootstrap_root_public.pem'));$contentExpected=SpkiSha ([IO.File]::ReadAllText('./filling/security/keys/content_public.pem'))
+          if((SpkiSha $env:KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM)-ne$bootstrapExpected){throw 'repository-v1 bootstrap private key does not match Pantry public key'}
+          if((SpkiSha $env:KYRON_CONTENT_PRIVATE_PEM)-ne$contentExpected){throw 'repository-v1 content private key does not match Pantry public key'}
+          Write-Host '[PANTRY][SIGNER/READY] repository-v1 keypairs verified'
       - name: Materialize canonical code signer
         shell: pwsh
         env:
@@ -128,10 +142,12 @@ jobs:
           KYRON_CODESIGN_PFX: ${{ runner.temp }}\kyron-canonical.pfx
           KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
           KYRON_PANTRY_SIGNER_PROFILE: repository-v1
-          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets[vars.CREAM_A_NAME] }}
-          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets[vars.JAM_A_NAME] }}
+          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_REPOSITORY_BOOTSTRAP_PRIVATE_PEM }}
+          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_REPOSITORY_CONTENT_PRIVATE_PEM }}
         run: |
           $ErrorActionPreference='Stop'
+          $missingSigning=@('KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM','KYRON_CONTENT_PRIVATE_PEM')|Where-Object{[string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_))}
+          if($missingSigning.Count){throw "repository-v1 signing secret unavailable: $($missingSigning-join',')"}
           $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
           $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=launcher-publish-only sha256=$recipeSha"
