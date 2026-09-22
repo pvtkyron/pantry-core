@@ -99,26 +99,26 @@ jobs:
           KYRON_CODESIGN_PASSWORD_SECRET: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
         run: |
           $ErrorActionPreference='Stop'
-          if([string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PFX_BASE64)){throw 'canonical signing secret unavailable: KYRON_CODESIGN_PFX_BASE64'}
-          if([string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PASSWORD_SECRET)){throw 'canonical signing secret unavailable: KYRON_CODESIGN_PASSWORD'}
+          if([string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PFX_BASE64)){Write-Host '::error title=Canonical code signer::canonical signing secret unavailable: KYRON_CODESIGN_PFX_BASE64';throw 'canonical signing secret unavailable: KYRON_CODESIGN_PFX_BASE64'}
+          if([string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PASSWORD_SECRET)){Write-Host '::error title=Canonical code signer::canonical signing secret unavailable: KYRON_CODESIGN_PASSWORD';throw 'canonical signing secret unavailable: KYRON_CODESIGN_PASSWORD'}
           Write-Host "::add-mask::$($env:KYRON_CODESIGN_PFX_BASE64)"
           Write-Host "::add-mask::$($env:KYRON_CODESIGN_PASSWORD_SECRET)"
           $pfx=Join-Path $env:RUNNER_TEMP 'kyron-canonical.pfx'
-          try{$raw=[Convert]::FromBase64String($env:KYRON_CODESIGN_PFX_BASE64)}catch{throw 'canonical signing PFX base64 is invalid'}
+          try{$raw=[Convert]::FromBase64String($env:KYRON_CODESIGN_PFX_BASE64)}catch{Write-Host '::error title=Canonical code signer::canonical signing PFX base64 is invalid';throw 'canonical signing PFX base64 is invalid'}
           [IO.File]::WriteAllBytes($pfx,$raw)
           $meta=Get-Content -LiteralPath './source/security/signing/canonical-signer.json' -Raw|ConvertFrom-Json
           $flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
-          try{$cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$env:KYRON_CODESIGN_PASSWORD_SECRET,$flags)}catch{throw 'canonical signing PFX could not be opened'}
+          try{$cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$env:KYRON_CODESIGN_PASSWORD_SECRET,$flags)}catch{Write-Host '::error title=Canonical code signer::canonical signing PFX could not be opened';throw 'canonical signing PFX could not be opened'}
           try{
-            if(!$cert.HasPrivateKey){throw 'canonical signing PFX has no private key'}
+            if(!$cert.HasPrivateKey){Write-Host '::error title=Canonical code signer::canonical signing PFX has no private key';throw 'canonical signing PFX has no private key'}
             $sha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($cert.RawData)).ToLowerInvariant()
-            if($sha-ne([string]$meta.certificate_sha256).ToLowerInvariant()){throw 'canonical signing certificate SHA-256 mismatch'}
-            if(($cert.Thumbprint-replace'\s','').ToLowerInvariant()-ne([string]$meta.thumbprint_sha1).ToLowerInvariant()){throw 'canonical signing certificate SHA-1 mismatch'}
+            if($sha-ne([string]$meta.certificate_sha256).ToLowerInvariant()){Write-Host '::error title=Canonical code signer::canonical signing certificate SHA-256 mismatch';throw 'canonical signing certificate SHA-256 mismatch'}
+            if(($cert.Thumbprint-replace'\s','').ToLowerInvariant()-ne([string]$meta.thumbprint_sha1).ToLowerInvariant()){Write-Host '::error title=Canonical code signer::canonical signing certificate SHA-1 mismatch';throw 'canonical signing certificate SHA-1 mismatch'}
             $rsa=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($cert)
-            if($null-eq$rsa-or$rsa.KeySize-ne2048){throw 'canonical signing certificate RSA key mismatch'}
+            if($null-eq$rsa-or$rsa.KeySize-ne2048){Write-Host '::error title=Canonical code signer::canonical signing certificate RSA key mismatch';throw 'canonical signing certificate RSA key mismatch'}
             $mod=$rsa.ExportParameters($false).Modulus
             $modSha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($mod)).ToLowerInvariant()
-            if($modSha-ne([string]$meta.public_modulus_sha256).ToLowerInvariant()){throw 'canonical signing public modulus mismatch'}
+            if($modSha-ne([string]$meta.public_modulus_sha256).ToLowerInvariant()){Write-Host '::error title=Canonical code signer::canonical signing public modulus mismatch';throw 'canonical signing public modulus mismatch'}
             Write-Host "[SIGNING/CANONICAL][OK] certificate_sha256=$sha"
           }finally{
             if($null-ne$rsa){$rsa.Dispose()}
