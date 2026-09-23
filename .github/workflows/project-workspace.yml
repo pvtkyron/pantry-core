@@ -183,7 +183,7 @@ jobs:
           try{
             . .\source\scripts\workspace-common.ps1
             $signerRoot=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1'
-            $missingSigning=@('bootstrap_root_private.pem','bootstrap_root_public.pem','content_private.pem','content_public.pem')|Where-Object{!(Test-Path -LiteralPath (Join-Path $signerRoot $_) -PathType Leaf)}
+            $missingSigning=@(@('bootstrap_root_private.pem','bootstrap_root_public.pem','content_private.pem','content_public.pem')|Where-Object{!(Test-Path -LiteralPath (Join-Path $signerRoot $_) -PathType Leaf)})
             if($missingSigning.Count){throw "hosted canonical local signer state missing: $($missingSigning-join',')"}
             $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
             $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
