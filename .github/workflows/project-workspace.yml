@@ -167,6 +167,27 @@ jobs:
             *-sdk/LLVMMinGW
           key: workspace-toolchains-v7-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
 
+      - name: Install managed .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Bind managed SDK to canonical Workspace root
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          . .\source\scripts\workspace-common.ps1
+          $sdk=Resolve-WorkspaceSdkRoot
+          $dotnet=(Get-Command dotnet.exe -ErrorAction Stop).Source
+          $target=Join-Path $sdk 'dotnet\current'
+          New-Item -ItemType Directory -Force (Split-Path $target -Parent)|Out-Null
+          if(!(Test-Path -LiteralPath $target -PathType Container)){New-Item -ItemType Junction -Path $target -Target (Split-Path $dotnet -Parent)|Out-Null}
+          $bound=Join-Path $target 'dotnet.exe'
+          if(!(Test-Path -LiteralPath $bound -PathType Leaf)){throw 'Canonical managed .NET SDK binding is unavailable'}
+          $versions=@(& $bound --list-sdks)
+          if(!@($versions|Where-Object{$_ -match '^8\.0\.'}).Count){throw 'Canonical managed .NET 8 SDK is unavailable'}
+          Write-Host '[TOOLCHAIN][DOTNET][OK] canonical SDK root bound to .NET 8'
+
       - name: Ensure canonical Workspace toolchain
         shell: pwsh
         run: |
