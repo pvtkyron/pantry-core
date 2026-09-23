@@ -147,6 +147,7 @@ jobs:
           KYRON_PANTRY_SIGNER_PROFILE: local-machine-v1
         run: |
           $ErrorActionPreference='Stop'
+          $env:KYRON_PANTRY_CORE_ROOT=Join-Path $PWD.Path 'shelf'
           $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
           $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=launcher-publish-only sha256=$recipeSha"
