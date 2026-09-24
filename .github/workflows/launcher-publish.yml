@@ -20,9 +20,21 @@ jobs:
     name: Build sign prepare and publish canonical release
     runs-on: windows-2025
     timeout-minutes: 360
+    env:
+      KYRON_SERIAL_BUILD: '1'
+      KYRON_BUILD_JOBS: '2'
+      KYRON_MSBUILD_TIMEOUT_SECONDS: '1200'
+      KYRON_SLICE_TIMEOUT_SECONDS: '3600'
+      KYRON_HEARTBEAT_SECONDS: '30'
+      ANDROID_HOME: ''
+      ANDROID_SDK_ROOT: ''
+      ANDROID_NDK_HOME: ''
+      ANDROID_NDK_ROOT: ''
+      NDK_ROOT: ''
+      JAVA_HOME: ''
     steps:
       - name: Open Pantry Core publish target
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           path: shelf
@@ -31,7 +43,7 @@ jobs:
           show-progress: false
 
       - name: Open canonical Workspace
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: pvtkyron/Workspace
           token: ${{ secrets[vars.MIX_KEY_NAME] }}
@@ -43,7 +55,7 @@ jobs:
           show-progress: false
 
       - name: Open canonical Pantry
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: pvtkyron/pantry
           token: ${{ secrets[vars.FILL_KEY_NAME] }}
@@ -118,7 +130,7 @@ jobs:
           }
 
       - name: Chill Workspace toolchains
-        uses: actions/cache@v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             *-sdk/Android
@@ -128,13 +140,13 @@ jobs:
           key: workspace-toolchains-v7-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
 
       - name: Chill publisher Python
-        uses: actions/cache@v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: '*-sdk/Python'
           key: pantry-publisher-python-v3-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
 
       - name: Install managed .NET 8 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '8.0.x'
 
@@ -181,7 +193,9 @@ jobs:
             if($code){
               $safe='canonical release entrypoint failed'
               $raw=@(Get-Content -LiteralPath $releaseLog -ErrorAction SilentlyContinue)
-              $candidate=@($raw|Where-Object{$_ -notmatch '(?i)(password|secret|token|authorization|private[ _-]?key|capsule|FullyQualifiedErrorId|CategoryInfo|^\s*At .+ line:)' -and $_ -match '(?i)(error|fail|missing|invalid|rejected|mismatch|requires|cannot|could not|forbidden|not recognized|the term)'}|Select-Object -Last 2)
+              $clean=@($raw|Where-Object{$_ -notmatch '(?i)(password|secret|token|authorization|private[ _-]?key|capsule|FullyQualifiedErrorId|CategoryInfo|^\s*At .+ line:)'})
+              $candidate=@($clean|Where-Object{$_ -match '(?i)(fatal error|error (?:C|LNK|MSB|NETSDK|NU|CS)\d+|:\s*error\s*:|linker command failed|ninja:.*failed|make:\s*\*\*\*|ndk-build.*(?:error|fail))'}|Select-Object -Last 1)
+              if(!$candidate.Count){$candidate=@($clean|Where-Object{$_ -notmatch '(?i)\[PANTRY\]\[(?:ATTEMPT|ACTION)\]' -and $_ -match '(?i)(error|fail|missing|invalid|rejected|mismatch|requires|cannot|could not|forbidden|not recognized|the term)'}|Select-Object -Last 2)}
               if($candidate.Count){$safe=((@($candidate)-join' | ')-replace '[A-Za-z0-9+/=]{80,}','[redacted]').Trim()}
               if($safe.Length-gt600){$safe=$safe.Substring(0,600)}
               $safe=$safe.Replace('%2','%252').Replace('%3','%253').Replace("`r",'%0D').Replace("`n",'%0A')
