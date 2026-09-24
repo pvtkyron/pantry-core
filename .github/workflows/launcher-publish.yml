@@ -181,8 +181,8 @@ jobs:
             if($code){
               $safe='canonical release entrypoint failed'
               $raw=@(Get-Content -LiteralPath $releaseLog -ErrorAction SilentlyContinue)
-              $candidate=@($raw|Where-Object{$_ -notmatch '(?i)(password|secret|token|authorization|private[ _-]?key|capsule)' -and $_ -match '(?i)(error|fail|missing|invalid|rejected|mismatch|requires|cannot|could not|forbidden)'}|Select-Object -Last 1)
-              if($candidate.Count){$safe=([string]$candidate[0]-replace '[A-Za-z0-9+/=]{80,}','[redacted]').Trim()}
+              $candidate=@($raw|Where-Object{$_ -notmatch '(?i)(password|secret|token|authorization|private[ _-]?key|capsule|FullyQualifiedErrorId|CategoryInfo|^\s*At .+ line:)' -and $_ -match '(?i)(error|fail|missing|invalid|rejected|mismatch|requires|cannot|could not|forbidden|not recognized|the term)'}|Select-Object -Last 2)
+              if($candidate.Count){$safe=((@($candidate)-join' | ')-replace '[A-Za-z0-9+/=]{80,}','[redacted]').Trim()}
               if($safe.Length-gt600){$safe=$safe.Substring(0,600)}
               $safe=$safe.Replace('%2','%252').Replace('%3','%253').Replace("`r",'%0D').Replace("`n",'%0A')
               Write-Host ('::error title=Canonical Kyron release rejected::{0}' -f $safe)
