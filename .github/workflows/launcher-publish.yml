@@ -1,10 +1,11 @@
-name: Launcher Pantry Core Publish
+name: Kyron Canonical Release
 
 on:
   push:
     branches: [main]
     paths:
       - '.github/launcher-publish.trigger'
+      - '.github/workflows/launcher-publish.yml'
   workflow_dispatch:
 
 permissions:
@@ -16,9 +17,9 @@ concurrency:
 
 jobs:
   publish:
-    name: Publish repository-trust launcher content
+    name: Build sign prepare and publish canonical release
     runs-on: windows-2025
-    timeout-minutes: 35
+    timeout-minutes: 360
     steps:
       - name: Open Pantry Core publish target
         uses: actions/checkout@v6
@@ -160,7 +161,7 @@ jobs:
           & .\source\scripts\ensure-workspace-toolchain.ps1
           if(!$?){throw 'Canonical Workspace toolchain bootstrap failed'}
 
-      - name: Publish launcher Pantry Core
+      - name: Build sign prepare and publish Pantry Core
         shell: pwsh
         env:
           KYRON_CODESIGN_PFX: ${{ runner.temp }}\kyron-canonical.pfx
@@ -171,19 +172,19 @@ jobs:
           $env:KYRON_PANTRY_CORE_ROOT=Join-Path $PWD.Path 'shelf'
           $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
           $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
-          Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=launcher-publish-only sha256=$recipeSha"
+          Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=full-local-release sha256=$recipeSha"
           try {
-          & $recipe -PantryPath (Join-Path $PWD.Path 'filling') -PantryCorePath (Join-Path $PWD.Path 'shelf') -RunId ([long]'${{ github.run_id }}') -RunAttempt ([int]'${{ github.run_attempt }}') -RuntimeChannel both -ArtifactPlan launcher -IncludeLauncher -SkipArtifactPromotion
+          & $recipe -PantryPath (Join-Path $PWD.Path 'filling') -PantryCorePath (Join-Path $PWD.Path 'shelf') -RunId ([long]'${{ github.run_id }}') -RunAttempt ([int]'${{ github.run_attempt }}') -RuntimeChannel both -IncludeLauncher
             $code=$LASTEXITCODE
           } catch {
             $msg=[regex]::Replace([string]$_.Exception.Message,'[\r\n]+',' ')
             if($msg.Length -gt 800){$msg=$msg.Substring(0,800)}
             $msg=$msg.Replace('%','%25')
-            Write-Host ('::error title=Launcher Pantry Core publication rejected::{0}' -f $msg)
+            Write-Host ('::error title=Canonical Kyron release rejected::{0}' -f $msg)
             throw
           }
-          if($code){Write-Host ('::error title=Launcher Pantry Core publication rejected::Canonical runner exit code {0}' -f $code);exit $code}
-          Write-Host '[PANTRY/LAUNCHER-PUBLISH][OK]'
+          if($code){Write-Host ('::error title=Canonical Kyron release rejected::Canonical runner exit code {0}' -f $code);exit $code}
+          Write-Host '[PANTRY/RELEASE-PUBLISH][OK] full local-equivalent transaction complete'
 
       - name: Remove ephemeral canonical signer
         if: ${{ always() }}
