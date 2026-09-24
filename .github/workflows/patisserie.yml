@@ -1,5 +1,5 @@
 name: Kyron Sequential Source Pipeline
-run-name: "Kyron ${{ inputs.runtime_channel || 'both' }} / launcher=${{ inputs.include_launcher || false }} / ${{ github.event_name }}"
+run-name: "Kyron ${{ inputs.runtime_channel || 'both' }} / launcher=${{ github.event_name != 'workflow_dispatch' || inputs.include_launcher == true }} / ${{ github.event_name }}"
 # Public orchestration carries only encrypted private source state.
 # Pipeline generation: 3
 
@@ -18,7 +18,7 @@ on:
       include_launcher:
         description: Also rebuild Launcher (requires canonical PFX secret)
         required: false
-        default: false
+        default: true
         type: boolean
   repository_dispatch:
     types: [fresh-batch]
@@ -32,6 +32,7 @@ on:
       - '.github/workflows/project-sdk.yml'
       - '.github/workflows/project-web.yml'
       - '.github/workflows/project-workspace.yml'
+      - '.github/workflows/box.yml'
       - '.github/workflows/doctor.yml'
       - '.github/workflows/headless.yml'
       - '.github/actions/private-capsule/**'
@@ -77,7 +78,7 @@ jobs:
     with:
       capsule: ${{ needs.sources.outputs.capsule }}
       runtime_channel: ${{ inputs.runtime_channel || 'both' }}
-      include_launcher: ${{ inputs.include_launcher == true }}
+      include_launcher: ${{ github.event_name != 'workflow_dispatch' || inputs.include_launcher == true }}
     secrets: inherit
 
   doctor:
@@ -89,10 +90,23 @@ jobs:
       capsule: ${{ needs.workspace.outputs.delivery_capsule }}
     secrets: inherit
 
-  headless:
-    name: 6 · Post-publish runtime smoke
+  publish:
+    name: 6 · Pantry Core canonical publish
     needs: [workspace, doctor]
+    permissions:
+      contents: write
     if: ${{ needs.doctor.result == 'success' }}
+    uses: ./.github/workflows/box.yml
+    with:
+      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+      runtime_channel: ${{ inputs.runtime_channel || 'both' }}
+      include_launcher: ${{ github.event_name != 'workflow_dispatch' || inputs.include_launcher == true }}
+    secrets: inherit
+
+  headless:
+    name: 7 · Post-publish runtime smoke
+    needs: [workspace, publish]
+    if: ${{ needs.publish.result == 'success' }}
     uses: ./.github/workflows/headless.yml
     with:
       capsule: ${{ needs.workspace.outputs.delivery_capsule }}

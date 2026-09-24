@@ -211,7 +211,7 @@ jobs:
             $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
             $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
             Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=prepare-only sha256=$recipeSha"
-            $releaseArgs=@{PantryPath=(Join-Path $PWD.Path 'filling');PantryCorePath=(Join-Path $PWD.Path 'shelf');RunId=[long]'${{ github.run_id }}';RunAttempt=[int]'${{ github.run_attempt }}';RuntimeChannel='${{ inputs.runtime_channel }}';PrepareOnly=$true}
+            $releaseArgs=@{PantryPath=(Join-Path $PWD.Path 'filling');PantryCorePath=(Join-Path $PWD.Path 'shelf');RunId=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();RunAttempt=[int]'${{ github.run_attempt }}';RuntimeChannel='${{ inputs.runtime_channel }}';PrepareOnly=$true}
             if('${{ inputs.include_launcher }}'-eq'true'){$releaseArgs.IncludeLauncher=$true}
             & $recipe @releaseArgs *>&1 | Set-Content -LiteralPath $log
             if($LASTEXITCODE){throw 'Canonical Workspace/Pantry release runner rejected private prepare-only mode'}
