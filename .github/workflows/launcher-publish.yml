@@ -174,9 +174,19 @@ jobs:
           $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
           $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=full-local-release sha256=$recipeSha"
+          $releaseLog=Join-Path $env:RUNNER_TEMP 'canonical-release.log'
           try {
-          & $entry -PantryPath (Join-Path $PWD.Path 'filling') -PantryCorePath (Join-Path $PWD.Path 'shelf') -RunId ([long]'${{ github.run_id }}') -RunAttempt ([int]'${{ github.run_attempt }}') -RuntimeChannel both -IncludeLauncher
+          & $entry -PantryPath (Join-Path $PWD.Path 'filling') -PantryCorePath (Join-Path $PWD.Path 'shelf') -RunId ([long]'${{ github.run_id }}') -RunAttempt ([int]'${{ github.run_attempt }}') -RuntimeChannel both -IncludeLauncher 2>&1 | Tee-Object -FilePath $releaseLog
             $code=$LASTEXITCODE
+            if($code){
+              $safe='canonical release entrypoint failed'
+              $raw=@(Get-Content -LiteralPath $releaseLog -ErrorAction SilentlyContinue)
+              $candidate=@($raw|Where-Object{$_ -notmatch '(?i)(password|secret|token|authorization|private[ _-]?key|capsule)' -and $_ -match '(?i)(error|fail|missing|invalid|rejected|mismatch|requires|cannot|could not|forbidden)'}|Select-Object -Last 1)
+              if($candidate.Count){$safe=([string]$candidate[0]-replace '[A-Za-z0-9+/=]{80,}','[redacted]').Trim()}
+              if($safe.Length-gt600){$safe=$safe.Substring(0,600)}
+              $safe=$safe.Replace('%2','%252').Replace('%3','%253').Replace("`r",'%0D').Replace("`n",'%0A')
+              Write-Host ('::error title=Canonical Kyron release rejected::{0}' -f $safe)
+            }
           } catch {
             $msg=[regex]::Replace([string]$_.Exception.Message,'[\r\n]+',' ')
             if($msg.Length -gt 800){$msg=$msg.Substring(0,800)}
