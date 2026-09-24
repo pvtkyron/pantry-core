@@ -176,7 +176,7 @@ jobs:
           Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=full-local-release sha256=$recipeSha"
           $releaseLog=Join-Path $env:RUNNER_TEMP 'canonical-release.log'
           try {
-          & $entry -PantryPath (Join-Path $PWD.Path 'filling') -PantryCorePath (Join-Path $PWD.Path 'shelf') -RunId ([long]'${{ github.run_id }}') -RunAttempt ([int]'${{ github.run_attempt }}') -RuntimeChannel both -IncludeLauncher 2>&1 | Tee-Object -FilePath $releaseLog
+          & $entry -PantryPath (Join-Path $PWD.Path 'filling') -PantryCorePath (Join-Path $PWD.Path 'shelf') -RunId ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) -RunAttempt ([int]'${{ github.run_attempt }}') -RuntimeChannel both -IncludeLauncher 2>&1 | Tee-Object -FilePath $releaseLog
             $code=$LASTEXITCODE
             if($code){
               $safe='canonical release entrypoint failed'
