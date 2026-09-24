@@ -64,8 +64,6 @@ jobs:
         shell: pwsh
         run: |
           $targets=@(
-            @{Configuration='Debug';Platform='x64'},
-            @{Configuration='Debug';Platform='Win32'},
             @{Configuration='Release';Platform='x64'},
             @{Configuration='Release';Platform='Win32'}
           )
