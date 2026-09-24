@@ -121,6 +121,41 @@ jobs:
           persist-credentials: false
           show-progress: false
 
+      - name: Import canonical doctor signer
+        shell: pwsh
+        env:
+          KYRON_CODESIGN_PFX_BASE64: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
+          KYRON_CODESIGN_PASSWORD_SECRET: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PFX_BASE64)-or[string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PASSWORD_SECRET)){throw 'Canonical doctor signing secrets unavailable'}
+          $raw=[Convert]::FromBase64String($env:KYRON_CODESIGN_PFX_BASE64)
+          $flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet -bor [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet
+          $cert=$null;$rsa=$null;$store=$null
+          try{
+            $password=$env:KYRON_CODESIGN_PASSWORD_SECRET.TrimEnd([char[]]@(13,10))
+            $cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($raw,$password,$flags)
+            $meta=Get-Content -LiteralPath './source/security/signing/canonical-signer.json' -Raw|ConvertFrom-Json
+            $thumb=([string]$meta.thumbprint_sha1 -replace '[^0-9A-Fa-f]','').ToUpperInvariant()
+            $sha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($cert.RawData)).ToLowerInvariant()
+            if(!$cert.HasPrivateKey -or $sha-ne([string]$meta.certificate_sha256).ToLowerInvariant() -or $cert.Thumbprint-ne$thumb){throw 'Canonical doctor certificate identity mismatch'}
+            $rsa=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($cert)
+            if($null-eq$rsa){throw 'Canonical doctor certificate is not RSA'}
+            $mod=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($rsa.ExportParameters($false).Modulus)).ToLowerInvariant()
+            if($mod-ne([string]$meta.public_modulus_sha256).ToLowerInvariant()){throw 'Canonical doctor public modulus mismatch'}
+            $store=[Security.Cryptography.X509Certificates.X509Store]::new('My',[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+            $store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+            if(@($store.Certificates|Where-Object {$_.Thumbprint-eq$thumb}).Count-ne0){throw 'Canonical doctor certificate already present'}
+            $store.Add($cert)
+            "KYRON_DOCTOR_CERT_THUMB=$thumb" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host '[DOCTOR/SIGNER][OK] exact canonical certificate imported into CurrentUser/My'
+          }finally{
+            if($null-ne$store){$store.Close();$store.Dispose()}
+            if($null-ne$rsa){$rsa.Dispose()}
+            if($null-ne$cert){$cert.Dispose()}
+            [Security.Cryptography.CryptographicOperations]::ZeroMemory($raw)
+          }
+
       - name: Taste quietly
         shell: pwsh
         run: |
@@ -136,4 +171,12 @@ jobs:
             exit 1
           }finally{
             if(Test-Path $log){Remove-Item $log -Force -ErrorAction SilentlyContinue}
+          }
+      - name: Remove canonical doctor signer
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          if($env:KYRON_DOCTOR_CERT_THUMB -match '^[0-9A-F]{40}$'){
+            $cert=Get-Item -LiteralPath "Cert:\CurrentUser\My\$env:KYRON_DOCTOR_CERT_THUMB" -ErrorAction SilentlyContinue
+            if($cert){Remove-Item -LiteralPath $cert.PSPath -Force}
           }
