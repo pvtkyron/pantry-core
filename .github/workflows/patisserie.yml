@@ -1,7 +1,7 @@
 name: Kyron Sequential Source Pipeline
 run-name: "Kyron ${{ inputs.runtime_channel || 'both' }} / launcher=${{ github.event_name != 'workflow_dispatch' || inputs.include_launcher == true }} / ${{ github.event_name }}"
 # Public orchestration carries only encrypted private source state.
-# Pipeline generation: 3
+# Pipeline generation: 4
 
 on:
   workflow_dispatch:
@@ -32,6 +32,8 @@ on:
       - '.github/workflows/project-sdk.yml'
       - '.github/workflows/project-web.yml'
       - '.github/workflows/project-workspace.yml'
+      - '.github/workflows/workspace-*.yml'
+      - '.github/workflows/workspace-handoff.ps1'
       - '.github/workflows/box.yml'
       - '.github/workflows/doctor.yml'
       - '.github/workflows/headless.yml'
