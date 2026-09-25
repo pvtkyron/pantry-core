@@ -1,0 +1,143 @@
+name: Workspace Java lane
+
+on:
+  workflow_call:
+    inputs:
+      capsule:
+        required: true
+        type: string
+      include_launcher:
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  java:
+    name: Compile Pantry Java + D8
+    runs-on: windows-2025
+    timeout-minutes: 120
+    env:
+      KYRON_SERIAL_BUILD: '1'
+      KYRON_BUILD_JOBS: '2'
+      ANDROID_HOME: ''
+      ANDROID_SDK_ROOT: ''
+      ANDROID_NDK_HOME: ''
+      ANDROID_NDK_ROOT: ''
+      NDK_ROOT: ''
+      JAVA_HOME: ''
+    steps:
+      - name: Open lane recipe
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: |
+            .github/actions/private-capsule
+            .github/workflows/workspace-handoff.ps1
+
+      - name: Open private source state
+        id: state
+        uses: ./recipe/.github/actions/private-capsule
+        with:
+          mode: open
+          key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          capsule: ${{ inputs.capsule }}
+          project: workspace
+
+      - name: Open private Workspace
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.state.outputs.workspace_repo }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: ${{ steps.state.outputs.workspace_ref }}
+          path: source
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+
+      - name: Open pinned Pantry
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.state.outputs.pantry_repo }}
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: ${{ steps.state.outputs.pantry_ref }}
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+
+      - name: Bind release source branches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($repo in @('source','filling')){& git -C $repo checkout -q -B main HEAD;if($LASTEXITCODE){throw "release main binding rejected: $repo"}}
+
+      - name: Chill toolchains
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            *-sdk/Android
+            *-sdk/Java
+            *-sdk/Smali
+            *-sdk/LLVMMinGW
+          key: workspace-toolchains-v7-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
+
+      - name: Install managed .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Bind managed SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          . .\source\scripts\workspace-common.ps1
+          $sdk=Resolve-WorkspaceSdkRoot;$dotnet=(Get-Command dotnet.exe -ErrorAction Stop).Source;$target=Join-Path $sdk 'dotnet\current'
+          New-Item -ItemType Directory -Force (Split-Path $target -Parent)|Out-Null
+          if(!(Test-Path -LiteralPath $target -PathType Container)){New-Item -ItemType Junction -Path $target -Target (Split-Path $dotnet -Parent)|Out-Null}
+          $bound=Join-Path $target 'dotnet.exe';if(!(Test-Path -LiteralPath $bound -PathType Leaf)){throw 'Canonical managed .NET SDK binding is unavailable'}
+
+      - name: Ensure canonical Workspace toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\source\scripts\ensure-workspace-toolchain.ps1
+          if(!$?){throw 'Canonical Workspace toolchain bootstrap failed'}
+
+      - name: Compile Java source lane
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $plan=if('${{ inputs.include_launcher }}'-eq'true'){'both'}else{'runtime'}
+          & .\source\PantryPublisher\Preflight-PantryRelease.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -ArtifactPlan $plan
+          if(!$?){throw 'Pantry Java/JAR/D8 lane failed'}
+          Write-Host "[PROJECT/WORKSPACE/JAVA][OK] plan=$plan"
+
+      - name: Seal Java lane proof
+        id: shard
+        shell: pwsh
+        env:
+          KYRON_HANDOFF_SECRET: ${{ secrets[vars.MIX_KEY_NAME] }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $workspaceSha=(& git -C source rev-parse HEAD).Trim().ToLowerInvariant();$pantrySha=(& git -C filling rev-parse HEAD).Trim().ToLowerInvariant()
+          $out=Join-Path $env:RUNNER_TEMP 'workspace-java-handoff'
+          & .\recipe\.github\workflows\workspace-handoff.ps1 -Mode pack -Lane java -PantryRoot (Join-Path $PWD.Path 'filling') -WorkspaceSha $workspaceSha -PantrySha $pantrySha -Secret $env:KYRON_HANDOFF_SECRET -SourceRoot (Join-Path $PWD.Path 'source') -OutputRoot $out
+
+      - name: Upload encrypted Java proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: kyron-workspace-java-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.shard.outputs.root }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
