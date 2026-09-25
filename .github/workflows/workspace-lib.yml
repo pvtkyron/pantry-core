@@ -77,6 +77,24 @@ jobs:
           $ErrorActionPreference='Stop'
           foreach($repo in @('source','filling')){& git -C $repo checkout -q -B main HEAD;if($LASTEXITCODE){throw "release main binding rejected: $repo"}}
 
+      - name: Materialize canonical Pantry trust
+        shell: pwsh
+        env:
+          CREAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+          CREAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+          JAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+          JAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($n in @('CREAM_A','CREAM_B','JAM_A','JAM_B')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical local Pantry signer input missing: $n"}}
+          . .\source\scripts\workspace-common.ps1
+          $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1';New-Item -ItemType Directory -Force -Path $root|Out-Null;$utf8=[Text.UTF8Encoding]::new($false)
+          foreach($x in @(@('bootstrap_root_private.pem','CREAM_A'),@('bootstrap_root_public.pem','CREAM_B'),@('content_private.pem','JAM_A'),@('content_public.pem','JAM_B'))){[IO.File]::WriteAllText((Join-Path $root $x[0]),([Environment]::GetEnvironmentVariable($x[1])).Trim()+"`n",$utf8)}
+          & .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -Workspace (Join-Path $PWD.Path 'source') -ExpectedProfile local-machine-v1 -Ephemeral -RequireExistingIdentity|Out-Null
+          if(!$?){throw 'Canonical local Pantry trust generation failed'}
+          $trust=Join-Path $PWD.Path 'source\src\android\VeraInternal\jni\Protection\PantryLocalTrust.generated.hpp';if(!(Test-Path -LiteralPath $trust -PathType Leaf)){throw 'VeraInternal generated Pantry trust header is unavailable'}
+          Write-Host '[PROJECT/WORKSPACE/LIB/TRUST][OK] canonical local-machine-v1 header materialized'
+
       - name: Chill toolchains
         uses: actions/cache@v6.1.0
         with:
@@ -144,3 +162,12 @@ jobs:
           retention-days: 1
           compression-level: 0
           overwrite: true
+
+      - name: Remove ephemeral Pantry trust material
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          if(Test-Path '.\source\scripts\workspace-common.ps1'){
+            . .\source\scripts\workspace-common.ps1
+            $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1';if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}
+          }
