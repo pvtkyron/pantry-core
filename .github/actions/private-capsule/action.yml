@@ -105,6 +105,8 @@ runs:
         }
         $mode=($env:CAPSULE_MODE+'').Trim().ToLowerInvariant()
         if($mode-eq'seal'){
+          try{$initial=$env:CAPSULE_PAYLOAD|ConvertFrom-Json}catch{throw 'private capsule payload rejected'}
+          CheckState $initial
           $sealed=Seal $env:CAPSULE_PAYLOAD
           "capsule=$sealed" >> $env:GITHUB_OUTPUT
           Write-Host '[CAPSULE][SEALED]'
