@@ -1,0 +1,229 @@
+name: Workspace prepare lane
+
+on:
+  workflow_call:
+    inputs:
+      capsule:
+        required: true
+        type: string
+      runtime_channel:
+        required: false
+        default: both
+        type: string
+      include_launcher:
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      delivery_capsule:
+        description: Encrypted private delivery state
+        value: ${{ jobs.prepare.outputs.delivery_capsule }}
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: Restore lanes + prepare private Pantry
+    runs-on: windows-2025
+    timeout-minutes: 240
+    outputs:
+      delivery_capsule: ${{ steps.advance.outputs.capsule }}
+    env:
+      KYRON_SERIAL_BUILD: '1'
+      KYRON_BUILD_JOBS: '2'
+      KYRON_MSBUILD_TIMEOUT_SECONDS: '1200'
+      KYRON_SLICE_TIMEOUT_SECONDS: '3600'
+      KYRON_HEARTBEAT_SECONDS: '30'
+      ANDROID_HOME: ''
+      ANDROID_SDK_ROOT: ''
+      ANDROID_NDK_HOME: ''
+      ANDROID_NDK_ROOT: ''
+      NDK_ROOT: ''
+      JAVA_HOME: ''
+    steps:
+      - name: Open prepare recipe
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: |
+            .github/actions/private-capsule
+            .github/workflows/workspace-handoff.ps1
+
+      - name: Open private Workspace state
+        id: state
+        uses: ./recipe/.github/actions/private-capsule
+        with:
+          mode: open
+          key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          capsule: ${{ inputs.capsule }}
+          project: workspace
+
+      - name: Open private Workspace
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.state.outputs.workspace_repo }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: ${{ steps.state.outputs.workspace_ref }}
+          path: source
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+
+      - name: Open pinned Pantry
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.state.outputs.pantry_repo }}
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: ${{ steps.state.outputs.pantry_ref }}
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+
+      - name: Open Pantry Core publish base
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: shelf
+          fetch-depth: 1
+          persist-credentials: true
+          show-progress: false
+
+      - name: Bind canonical release branches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($repo in @('source','filling','shelf')){& git -C $repo checkout -q -B main HEAD;if($LASTEXITCODE){throw "release main binding rejected: $repo"}}
+
+      - name: Download Java proof
+        uses: actions/download-artifact@v4
+        with:
+          name: kyron-workspace-java-${{ github.run_id }}-${{ github.run_attempt }}
+          path: handoff/java
+
+      - name: Download native library lane
+        uses: actions/download-artifact@v4
+        with:
+          name: kyron-workspace-lib-${{ github.run_id }}-${{ github.run_attempt }}
+          path: handoff/lib
+
+      - name: Download executable lane
+        if: ${{ inputs.include_launcher }}
+        uses: actions/download-artifact@v4
+        with:
+          name: kyron-workspace-exe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: handoff/exe
+
+      - name: Verify and restore encrypted lanes
+        shell: pwsh
+        env:
+          KYRON_HANDOFF_SECRET: ${{ secrets[vars.MIX_KEY_NAME] }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $workspaceSha=(& git -C source rev-parse HEAD).Trim().ToLowerInvariant();$pantrySha=(& git -C filling rev-parse HEAD).Trim().ToLowerInvariant()
+          function Open-Lane([string]$lane,[bool]$restore){
+            $root=Join-Path $PWD.Path ("handoff\$lane");$bins=@(Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.bin');if($bins.Count-ne1){throw "Encrypted $lane handoff count rejected: $($bins.Count)"}
+            $stage=Join-Path $env:RUNNER_TEMP ("workspace-open-$lane");if(Test-Path $stage){Remove-Item $stage -Recurse -Force};New-Item -ItemType Directory -Force $stage|Out-Null
+            & .\recipe\.github\workflows\workspace-handoff.ps1 -Mode unpack -Lane $lane -PantryRoot (Join-Path $PWD.Path 'filling') -WorkspaceSha $workspaceSha -PantrySha $pantrySha -Secret $env:KYRON_HANDOFF_SECRET -InputPath $bins[0].FullName -OutputRoot $stage
+            if($restore){$src=Join-Path $stage 'source';if(!(Test-Path $src -PathType Container)){throw "$lane handoff payload root missing"};foreach($f in @(Get-ChildItem -LiteralPath $src -Recurse -File)){$rel=$f.FullName.Substring($src.Length+1);$dst=Join-Path (Join-Path $PWD.Path 'source') $rel;New-Item -ItemType Directory -Force (Split-Path $dst -Parent)|Out-Null;Copy-Item -LiteralPath $f.FullName -Destination $dst -Force}}
+          }
+          Open-Lane 'java' $false;Open-Lane 'lib' $true;if('${{ inputs.include_launcher }}'-eq'true'){Open-Lane 'exe' $true}
+          Write-Host '[PROJECT/WORKSPACE/HANDOFF][OK] encrypted lanes verified and restored'
+
+      - name: Materialize canonical Pantry signer
+        shell: pwsh
+        env:
+          CREAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+          CREAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+          JAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+          JAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
+        run: |
+          $ErrorActionPreference='Stop';foreach($n in @('CREAM_A','CREAM_B','JAM_A','JAM_B')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical local Pantry signer input missing: $n"}}
+          . .\source\scripts\workspace-common.ps1;$root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1';New-Item -ItemType Directory -Force -Path $root|Out-Null;$utf8=[Text.UTF8Encoding]::new($false)
+          foreach($x in @(@('bootstrap_root_private.pem','CREAM_A'),@('bootstrap_root_public.pem','CREAM_B'),@('content_private.pem','JAM_A'),@('content_public.pem','JAM_B'))){[IO.File]::WriteAllText((Join-Path $root $x[0]),([Environment]::GetEnvironmentVariable($x[1])).Trim()+"`n",$utf8)}
+          & .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -Workspace (Join-Path $PWD.Path 'source') -ExpectedProfile local-machine-v1 -Ephemeral -RequireExistingIdentity|Out-Null;if(!$?){throw 'Canonical local Pantry signer validation failed'}
+
+      - name: Materialize canonical code signer trust
+        shell: pwsh
+        env:
+          KYRON_CODESIGN_PFX_BASE64: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
+          KYRON_CODESIGN_PASSWORD_SECRET: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+        run: |
+          $ErrorActionPreference='Stop';if([string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PFX_BASE64)-or[string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PASSWORD_SECRET)){throw 'canonical signing secret unavailable'}
+          Write-Host "::add-mask::$($env:KYRON_CODESIGN_PFX_BASE64)";Write-Host "::add-mask::$($env:KYRON_CODESIGN_PASSWORD_SECRET)";$pfx=Join-Path $env:RUNNER_TEMP 'kyron-canonical.pfx';$raw=[Convert]::FromBase64String($env:KYRON_CODESIGN_PFX_BASE64);[IO.File]::WriteAllBytes($pfx,$raw)
+          $meta=Get-Content -LiteralPath './source/security/signing/canonical-signer.json' -Raw|ConvertFrom-Json;$flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet;$password=$env:KYRON_CODESIGN_PASSWORD_SECRET.TrimEnd([char[]]"`r`n");$cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$password,$flags)
+          try{$sha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($cert.RawData)).ToLowerInvariant();if(!$cert.HasPrivateKey-or$sha-ne([string]$meta.certificate_sha256).ToLowerInvariant()){throw 'canonical code signer identity mismatch'};$cer=Join-Path $env:RUNNER_TEMP 'kyron-canonical.cer';[IO.File]::WriteAllBytes($cer,$cert.RawData);foreach($storeName in @('Root','TrustedPublisher')){& certutil.exe -f -addstore $storeName $cer|Out-Host;if($LASTEXITCODE){throw "canonical signer trust import failed: $storeName"}}}finally{$cert.Dispose();[Security.Cryptography.CryptographicOperations]::ZeroMemory($raw)}
+
+      - name: Chill toolchains
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            *-sdk/Android
+            *-sdk/Java
+            *-sdk/Smali
+            *-sdk/LLVMMinGW
+          key: workspace-toolchains-v7-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
+
+      - name: Install managed .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Bind managed SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';. .\source\scripts\workspace-common.ps1;$sdk=Resolve-WorkspaceSdkRoot;$dotnet=(Get-Command dotnet.exe -ErrorAction Stop).Source;$target=Join-Path $sdk 'dotnet\current';New-Item -ItemType Directory -Force (Split-Path $target -Parent)|Out-Null
+          if(!(Test-Path -LiteralPath $target -PathType Container)){New-Item -ItemType Junction -Path $target -Target (Split-Path $dotnet -Parent)|Out-Null};if(!(Test-Path -LiteralPath (Join-Path $target 'dotnet.exe') -PathType Leaf)){throw 'Canonical managed .NET SDK binding is unavailable'}
+
+      - name: Ensure canonical Workspace toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';& .\source\scripts\ensure-workspace-toolchain.ps1;if(!$?){throw 'Canonical Workspace toolchain bootstrap failed'}
+
+      - name: Promote restored lanes into Pantry
+        shell: pwsh
+        env:
+          KYRON_PANTRY_SIGNER_PROFILE: local-machine-v1
+        run: |
+          $ErrorActionPreference='Stop';$plan=if('${{ inputs.include_launcher }}'-eq'true'){'both'}else{'runtime'};$args=@{PantryPath=(Join-Path $PWD.Path 'filling');RuntimeChannel='${{ inputs.runtime_channel }}';ArtifactPlan=$plan;SkipBuild=$true};if('${{ inputs.include_launcher }}'-eq'true'){$args.IncludeLauncher=$true}
+          & .\source\PantryPublisher\Update-PantryArtifacts.ps1 @args;if(!$?){throw 'Restored Workspace lane promotion failed'};Write-Host "[PROJECT/WORKSPACE/PROMOTE][OK] plan=$plan"
+
+      - name: Prepare Pantry Core without rebuilding lanes
+        shell: pwsh
+        env:
+          KYRON_CODESIGN_PFX: ${{ runner.temp }}\kyron-canonical.pfx
+          KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+          KYRON_PANTRY_SIGNER_PROFILE: local-machine-v1
+        run: |
+          $ErrorActionPreference='Stop';$plan=if('${{ inputs.include_launcher }}'-eq'true'){'both'}else{'runtime'};$recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1';$args=@{PantryPath=(Join-Path $PWD.Path 'filling');PantryCorePath=(Join-Path $PWD.Path 'shelf');RunId=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();RunAttempt=[int]'${{ github.run_attempt }}';RuntimeChannel='${{ inputs.runtime_channel }}';ArtifactPlan=$plan;PrepareOnly=$true;SkipArtifactPromotion=$true};if('${{ inputs.include_launcher }}'-eq'true'){$args.IncludeLauncher=$true}
+          & $recipe @args;if(!$?){throw 'Canonical Pantry prepare lane failed'};Write-Host '[PROJECT/WORKSPACE/PREPARE][OK] no lane rebuild'
+
+      - name: Pin private Pantry delivery
+        id: delivery
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';& git -C filling fetch --quiet --prune origin main 1>$null 2>$null;if($LASTEXITCODE){throw 'Pantry delivery refresh rejected'};$sha=(& git -C filling rev-parse refs/remotes/origin/main 2>$null).Trim().ToLowerInvariant();if($sha-notmatch'^[0-9a-f]{40}$'){throw 'Pantry delivery pin rejected'};Write-Host "::add-mask::$sha";"ref=$sha" >> $env:GITHUB_OUTPUT;Write-Host '[PROJECT/WORKSPACE][DELIVERY][OK]'
+
+      - name: Advance encrypted delivery state
+        id: advance
+        uses: ./recipe/.github/actions/private-capsule
+        with:
+          mode: advance
+          key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          capsule: ${{ inputs.capsule }}
+          pantry-ref: ${{ steps.delivery.outputs.ref }}
+
+      - name: Remove ephemeral signing material
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $metaPath='./source/security/signing/canonical-signer.json';if(Test-Path -LiteralPath $metaPath -PathType Leaf){$meta=Get-Content -LiteralPath $metaPath -Raw|ConvertFrom-Json;$thumb=([string]$meta.thumbprint_sha1-replace'\s','').ToUpperInvariant();foreach($storeName in @('TrustedPublisher','Root')){& certutil.exe -delstore $storeName $thumb|Out-Null}}
+          foreach($leaf in @('kyron-canonical.cer','kyron-canonical.pfx')){$path=Join-Path $env:RUNNER_TEMP $leaf;if(Test-Path -LiteralPath $path -PathType Leaf){Remove-Item -LiteralPath $path -Force}}
+          if(Test-Path '.\source\scripts\workspace-common.ps1'){. .\source\scripts\workspace-common.ps1;$root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1';if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}}
