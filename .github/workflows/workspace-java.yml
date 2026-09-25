@@ -59,7 +59,7 @@ jobs:
           path: source
           fetch-depth: 1
           fetch-tags: false
-          persist-credentials: false
+          persist-credentials: true
           show-progress: false
 
       - name: Open pinned Pantry
@@ -71,7 +71,7 @@ jobs:
           path: filling
           fetch-depth: 1
           fetch-tags: false
-          persist-credentials: false
+          persist-credentials: true
           show-progress: false
 
       - name: Bind release source branches
