@@ -29,7 +29,7 @@ function Resolve-Python {
 }
 function Opaque-Route([string]$logical){
     $module=Join-Path $PantryRoot 'tools\opaque_paths.py';if(!(Test-Path -LiteralPath $module -PathType Leaf)){throw "Pantry opaque route owner missing: $module"}
-    $code='import importlib.util,sys; s=importlib.util.spec_from_file_location("kyron_opaque",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); print(m.opaque_path(sys.argv[2]))'
+    $code="import importlib.util,sys; s=importlib.util.spec_from_file_location('kyron_opaque',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); print(m.opaque_path(sys.argv[2]))"
     $route=(& (Resolve-Python) -c $code $module $logical|Select-Object -Last 1).Trim();if($LASTEXITCODE-ne0-or$route-notmatch'^kyron/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{28}\.bin$'){throw "Canonical Pantry opaque route rejected: $route"};return $route
 }
 function Protect-Bytes([byte[]]$plain){
