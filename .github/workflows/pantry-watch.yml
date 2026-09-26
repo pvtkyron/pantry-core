@@ -43,17 +43,26 @@ jobs:
             exit 1
           fi
 
-          pantry_api='https://api.github.com/repos/pvtkyron/pantry/commits/main'
+          pantry_remote='https://github.com/pvtkyron/pantry.git'
           dispatch_api='repos/pvtkyron/pantry-core/dispatches'
 
           pantry_sha() {
-            curl --fail --silent --show-error \
-              --retry 4 --retry-delay 2 --retry-all-errors \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              -H "Authorization: Bearer ${PANTRY_TOKEN}" \
-              "${pantry_api}" \
-              | jq -er '.sha | ascii_downcase | select(test("^[0-9a-f]{40}$"))'
+            local auth line sha attempt
+            auth="$(printf 'x-access-token:%s' "$PANTRY_TOKEN" | base64 -w0)"
+            for attempt in 1 2 3 4 5; do
+              if line="$(git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+                ls-remote --exit-code --refs "$pantry_remote" refs/heads/main 2>/dev/null)"; then
+                sha="${line%%[[:space:]]*}"
+                sha="${sha,,}"
+                if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+                  printf '%s\n' "$sha"
+                  return 0
+                fi
+              fi
+              sleep $((attempt * 2))
+            done
+            echo '::error title=Pantry watcher::unable to resolve private Pantry main through Git transport' >&2
+            return 1
           }
 
           published_sha() {
