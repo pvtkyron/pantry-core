@@ -106,12 +106,26 @@ jobs:
             if($LASTEXITCODE-ne0-or$sha-notmatch'^[0-9a-f]{40}$'){throw 'private source pin rejected'}
             return $sha
           }
+          $allowedWorkspaceActions=@{
+            'kyron-laptop-control.yml'='bfaa02698545b8e1672688c9517b13122e3a0e0d'
+          }
           foreach($root in @('workspace','filling','sdk-source','web-source')){
             $dir=Join-Path $PWD.Path "$root/.github/workflows"
-            if(Test-Path -LiteralPath $dir -PathType Container){
-              $bad=@(Get-ChildItem -LiteralPath $dir -File|Where-Object{$_.Extension -in '.yml','.yaml'})
-              if($bad.Count){throw 'private source Actions ownership rejected'}
+            if(!(Test-Path -LiteralPath $dir -PathType Container)){continue}
+            $actions=@(Get-ChildItem -LiteralPath $dir -File|Where-Object{$_.Extension -in '.yml','.yaml'})
+            if($root-eq'workspace'){
+              foreach($file in $actions){
+                $expected=[string]$allowedWorkspaceActions[$file.Name]
+                if([string]::IsNullOrWhiteSpace($expected)){throw 'private source unaudited Action rejected'}
+                $relative=".github/workflows/$($file.Name)"
+                $actual=(& git -C $root hash-object -- $relative 2>$null).Trim().ToLowerInvariant()
+                if($LASTEXITCODE-ne0-or$actual-ne$expected){throw 'private source audited Action drift rejected'}
+              }
+              if($actions.Count-ne$allowedWorkspaceActions.Count){throw 'private source audited Action set rejected'}
+              Write-Host '[SOURCES][ACTIONS][OK] pinned Workspace control action'
+              continue
             }
+            if($actions.Count){throw 'private source Actions ownership rejected'}
           }
           $workspaceRef=Head 'workspace';$pantryRef=Head 'filling';$sdkRef=Head 'sdk-source';$webRef=Head 'web-source'
           foreach($value in @($workspaceRef,$pantryRef,$sdkRef,$webRef)){Write-Host "::add-mask::$value"}
