@@ -27,33 +27,39 @@ jobs:
         with:
           ref: main
           path: shelf
-          fetch-depth: 100
+          fetch-depth: 200
+          filter: blob:none
           persist-credentials: false
           show-progress: false
+
+      - name: Open private Pantry tracker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pvtkyron/pantry
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: main
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+          sparse-checkout: |
+            SrcVersion.ini
+          sparse-checkout-cone-mode: false
 
       - name: Watch Pantry SHA continuously
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          PANTRY_TOKEN: ${{ secrets[vars.FILL_KEY_NAME] }}
         run: |
           set -euo pipefail
-          if [[ -z "${PANTRY_TOKEN:-}" ]]; then
-            echo '::error title=Pantry watcher::private Pantry read token is unavailable'
-            exit 1
-          fi
-
-          pantry_remote='https://github.com/pvtkyron/pantry.git'
           dispatch_api='repos/pvtkyron/pantry-core/dispatches'
 
           pantry_sha() {
-            local auth line sha attempt
-            auth="$(printf 'x-access-token:%s' "$PANTRY_TOKEN" | base64 -w0)"
+            local sha attempt
             for attempt in 1 2 3 4 5; do
-              if line="$(git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
-                ls-remote --exit-code --refs "$pantry_remote" refs/heads/main 2>/dev/null)"; then
-                sha="${line%%[[:space:]]*}"
-                sha="${sha,,}"
+              if git -C filling fetch --quiet --no-tags --prune origin '+refs/heads/main:refs/remotes/origin/main'; then
+                sha="$(git -C filling rev-parse refs/remotes/origin/main 2>/dev/null | tr '[:upper:]' '[:lower:]')"
                 if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
                   printf '%s\n' "$sha"
                   return 0
@@ -61,12 +67,12 @@ jobs:
               fi
               sleep $((attempt * 2))
             done
-            echo '::error title=Pantry watcher::unable to resolve private Pantry main through Git transport' >&2
+            echo '::error title=Pantry watcher::unable to resolve private Pantry main through checkout credentials' >&2
             return 1
           }
 
           published_sha() {
-            git -C shelf log -n 100 --format=%B \
+            git -C shelf log -n 200 --format=%B \
               | sed -nE 's/^Pantry-Source:[[:space:]]*([0-9a-fA-F]{40})[[:space:]]*$/\1/p' \
               | head -n 1 \
               | tr '[:upper:]' '[:lower:]'
@@ -90,9 +96,8 @@ jobs:
             echo "[PANTRY-WATCH][CURRENT] pantry=${current}"
           fi
 
-          # Stay alive across the four-hour restart cadence. The next scheduled
-          # watcher cancels this run only after it has actually started, leaving
-          # a large overlap budget for GitHub schedule jitter.
+          # Poll every 10 seconds. A scheduled replacement starts every four
+          # hours and cancels the older watcher only after the new run exists.
           deadline=$((SECONDS + 20700))
           while (( SECONDS < deadline )); do
             sleep 10
@@ -107,4 +112,4 @@ jobs:
             dispatch_mirror "$next"
           done
 
-          echo "[PANTRY-WATCH][ROTATE] watcher window complete"
+          echo '[PANTRY-WATCH][ROTATE] watcher window complete'
