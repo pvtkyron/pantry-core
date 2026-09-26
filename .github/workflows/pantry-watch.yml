@@ -1,0 +1,101 @@
+name: Pantry Instant Watch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pantry-watch.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '11 0,4,8,12,16,20 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pantry-instant-watch
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: Watch Pantry main and dispatch mirror
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: Open Pantry Core publication history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: shelf
+          fetch-depth: 100
+          persist-credentials: false
+          show-progress: false
+
+      - name: Watch Pantry SHA continuously
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PANTRY_TOKEN: ${{ secrets[vars.FILL_KEY_NAME] }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${PANTRY_TOKEN:-}" ]]; then
+            echo '::error title=Pantry watcher::private Pantry read token is unavailable'
+            exit 1
+          fi
+
+          pantry_api='https://api.github.com/repos/pvtkyron/pantry/commits/main'
+          dispatch_api='repos/pvtkyron/pantry-core/dispatches'
+
+          pantry_sha() {
+            curl --fail --silent --show-error \
+              --retry 4 --retry-delay 2 --retry-all-errors \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              -H "Authorization: Bearer ${PANTRY_TOKEN}" \
+              "${pantry_api}" \
+              | jq -er '.sha | ascii_downcase | select(test("^[0-9a-f]{40}$"))'
+          }
+
+          published_sha() {
+            git -C shelf log -n 100 --format=%B \
+              | sed -nE 's/^Pantry-Source:[[:space:]]*([0-9a-fA-F]{40})[[:space:]]*$/\1/p' \
+              | head -n 1 \
+              | tr '[:upper:]' '[:lower:]'
+          }
+
+          dispatch_mirror() {
+            local sha="$1"
+            jq -n --arg sha "$sha" '{event_type:"pantry-updated",client_payload:{pantry_sha:$sha}}' \
+              | gh api --method POST "$dispatch_api" --input - >/dev/null
+            echo "[PANTRY-WATCH][DISPATCHED] pantry=${sha}"
+          }
+
+          current="$(pantry_sha)"
+          published="$(published_sha || true)"
+          last_seen="$current"
+
+          if [[ "$current" != "$published" ]]; then
+            echo "[PANTRY-WATCH][UNPUBLISHED] pantry=${current} published=${published:-none}"
+            dispatch_mirror "$current"
+          else
+            echo "[PANTRY-WATCH][CURRENT] pantry=${current}"
+          fi
+
+          # Stay alive across the four-hour restart cadence. The next scheduled
+          # watcher cancels this run only after it has actually started, leaving
+          # a large overlap budget for GitHub schedule jitter.
+          deadline=$((SECONDS + 20700))
+          while (( SECONDS < deadline )); do
+            sleep 10
+            next="$(pantry_sha)"
+            if [[ "$next" == "$last_seen" ]]; then
+              continue
+            fi
+
+            previous="$last_seen"
+            last_seen="$next"
+            echo "[PANTRY-WATCH][CHANGE] from=${previous} to=${next}"
+            dispatch_mirror "$next"
+          done
+
+          echo "[PANTRY-WATCH][ROTATE] watcher window complete"
