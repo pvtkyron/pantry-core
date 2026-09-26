@@ -100,23 +100,27 @@ jobs:
         env:
           PFX_B64: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
           PFX_PASS: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
-          CERT_EXPECTED: ${{ secrets.KYRON_CODESIGN_CERT_SHA256 }}
         run: |
           $ErrorActionPreference='Stop'
-          foreach($n in @('PFX_B64','PFX_PASS','CERT_EXPECTED')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical code signer input missing: $n"}}
-          $expected=$env:CERT_EXPECTED.Trim().ToLowerInvariant()
+          foreach($n in @('PFX_B64','PFX_PASS')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical code signer input missing: $n"}}
+          $metaPath=Join-Path $PWD.Path 'source\security\signing\canonical-signer.json'
+          if(!(Test-Path -LiteralPath $metaPath -PathType Leaf)){throw 'canonical signer metadata unavailable'}
+          $meta=Get-Content -LiteralPath $metaPath -Raw|ConvertFrom-Json
+          $expected=([string]$meta.certificate_sha256).Trim().ToLowerInvariant()
           if($expected-notmatch'^[0-9a-f]{64}$'){throw 'canonical code signer SHA256 pin is invalid'}
           function CertSha256([Security.Cryptography.X509Certificates.X509Certificate2]$Cert){$sha=[Security.Cryptography.SHA256]::Create();try{return ([BitConverter]::ToString($sha.ComputeHash($Cert.RawData))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}}
           function OpenStore([string]$Name){$s=[Security.Cryptography.X509Certificates.X509Store]::new($Name,[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser);$s.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite);return $s}
           $root=Join-Path $env:RUNNER_TEMP 'kyron-native-codesign';New-Item -ItemType Directory -Force -Path $root|Out-Null
-          $pfx=Join-Path $root 'canonical.pfx';[IO.File]::WriteAllBytes($pfx,[Convert]::FromBase64String($env:PFX_B64))
+          $pfx=Join-Path $root 'canonical.pfx';$raw=[Convert]::FromBase64String($env:PFX_B64);[IO.File]::WriteAllBytes($pfx,$raw)
           $flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet -bor [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet -bor [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
-          $cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$env:PFX_PASS,$flags)
+          $password=$env:PFX_PASS.TrimEnd([char[]]"`r`n")
+          $cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$password,$flags)
           $actual=CertSha256 $cert
           if($actual-ne$expected){throw "canonical code signer pin mismatch: actual=$actual expected=$expected"}
           if(!$cert.HasPrivateKey){throw 'canonical code signer PFX does not expose a private key'}
           $thumb=([string]$cert.Thumbprint).Replace(' ','').ToUpperInvariant()
           if($thumb-notmatch'^[0-9A-F]{40}$'){throw 'canonical code signer thumbprint is invalid'}
+          if(([string]$meta.thumbprint_sha1)-and(([string]$meta.thumbprint_sha1).Replace(' ','').ToUpperInvariant()-ne$thumb)){throw 'canonical code signer SHA1 thumbprint mismatch'}
           $state=[ordered]@{expected=$expected;thumbprint=$thumb;pfx=$pfx;added_my=$false;added_root=$false;added_publisher=$false}
           $stores=@{}
           try{
@@ -131,7 +135,8 @@ jobs:
           $statePath=Join-Path $root 'state.json';$state|ConvertTo-Json -Compress|Set-Content -LiteralPath $statePath -Encoding utf8
           "KYRON_NATIVE_CODESIGN_STATE=$statePath" >> $env:GITHUB_ENV
           "KYRON_CODESIGN_PFX=$pfx" >> $env:GITHUB_ENV
-          "KYRON_CODESIGN_PASSWORD=$env:PFX_PASS" >> $env:GITHUB_ENV
+          "KYRON_CODESIGN_PASSWORD=$password" >> $env:GITHUB_ENV
+          [Security.Cryptography.CryptographicOperations]::ZeroMemory($raw)
           Write-Host "[PROJECT/WORKSPACE/LIB/CODESIGN][OK] cert=$expected private_key=CurrentUser/My"
 
       - name: Chill toolchains
