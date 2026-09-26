@@ -10,8 +10,8 @@
       "mandatory": false,
       "url": "https://pvtkyron.github.io/pantry-core/kyron/downloads/kyron-customer-android-latest.zip",
       "archiveUrl": "https://pvtkyron.github.io/pantry-core/kyron/releases/customer-android/kyron-customer-android-v10.1.12.zip",
-      "sha256": "c6a4ce709f57bc209faa64adb5506be837a3827ec358be06e17f676a578b1c76",
-      "size": 148691,
+      "sha256": "c5e1b767e9991a5ae0615809ebd2077fd3295395db87e3c07b7e3d2b6526fc4b",
+      "size": 148758,
       "filename": "kyron-customer-android-latest.zip",
       "notes": "Kyron Customer Android stable channel."
     },
@@ -21,8 +21,8 @@
       "mandatory": false,
       "url": "https://pvtkyron.github.io/pantry-core/kyron/downloads/kyron-orion-iphone-latest.zip",
       "archiveUrl": "https://pvtkyron.github.io/pantry-core/kyron/releases/orion-iphone/kyron-orion-iphone-v10.1.12.zip",
-      "sha256": "20821913986ef11ddbbfe1f9e71ba1b7014058c342e429f12491d3ce2357cb34",
-      "size": 150084,
+      "sha256": "f5820cb8bccd2ef6846e89f39da4e081a1c5383569acef24b46d1217e36e105b",
+      "size": 150151,
       "filename": "kyron-orion-iphone-latest.zip",
       "notes": "Kyron Customer Orion iPhone channel."
     }
