@@ -23,14 +23,16 @@ jobs:
       pantry_sha: ${{ steps.delta.outputs.pantry_sha }}
       published_sha: ${{ steps.delta.outputs.published_sha }}
     steps:
-      - name: Open Pantry Core history
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-          path: shelf
-          fetch-depth: 100
-          persist-credentials: false
-          show-progress: false
+      - name: Open Pantry Core commit history without payload blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir shelf
+          git -C shelf init -q
+          git -C shelf remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -C shelf -c protocol.version=2 fetch --quiet --no-tags --filter=blob:none --depth=500 origin main
+          git -C shelf update-ref refs/remotes/origin/main FETCH_HEAD
+          echo '[PANTRY-MIRROR][CORE-HISTORY][OK] depth=500 blobs=filtered'
 
       - name: Open canonical Pantry
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,6 +45,9 @@ jobs:
           fetch-tags: false
           persist-credentials: false
           show-progress: false
+          sparse-checkout: |
+            SrcVersion.ini
+          sparse-checkout-cone-mode: false
 
       - name: Compare Pantry source with latest publication
         id: delta
@@ -52,7 +57,7 @@ jobs:
           $pantrySha=(& git -C filling rev-parse HEAD).Trim().ToLowerInvariant()
           if($pantrySha -notmatch '^[0-9a-f]{40}$'){throw 'Pantry HEAD is invalid'}
           $published=''
-          $body=@(& git -C shelf log -n 100 --format=%B)
+          $body=@(& git -C shelf log -n 500 --format=%B refs/remotes/origin/main)
           foreach($line in $body){
             if(([string]$line) -match '^Pantry-Source:\s*(?<sha>[0-9a-fA-F]{40})\s*$'){$published=$Matches.sha.ToLowerInvariant();break}
           }
