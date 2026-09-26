@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "product": "kyron-v9",
+  "namespace": "kyron-v9-updates",
+  "version": "9.20.0",
+  "url": "https://pvtkyron.github.io/pantry-core/kyron-v9-updates/downloads/kyron-v9-latest.zip",
+  "archiveUrl": "https://pvtkyron.github.io/pantry-core/kyron-v9-updates/releases/kyron-v9.20.0.zip",
+  "sha256": "72f61d297f7011c882a3f6183a8e49f07e3fa5f6da8d24d7c304a17c069a0be7",
+  "size": 233449,
+  "notes": "Kyron v9.20.0 with worker-compatible CDN Vault sync using bkup/*.sitevault."
+}
