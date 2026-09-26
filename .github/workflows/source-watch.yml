@@ -1,0 +1,152 @@
+name: Private Source Instant Watch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/source-watch.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '23 0,4,8,12,16,20 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: private-source-instant-watch
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: Watch Workspace SDK and Web heads
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      POLL_SECONDS: '10'
+    steps:
+      - name: Open Workspace tracker and registry
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: workspace
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+          sparse-checkout: |
+            .kyron/private-projects.json
+          sparse-checkout-cone-mode: false
+
+      - name: Read private project registry
+        id: registry
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=Join-Path $PWD.Path 'workspace/.kyron/private-projects.json'
+          if(!(Test-Path -LiteralPath $path -PathType Leaf)){throw 'private project registry unavailable'}
+          $r=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json
+          if([int]$r.schema-ne1){throw 'private project registry schema rejected'}
+          $sdk=([string]$r.projects.sdk).Trim();$web=([string]$r.projects.web).Trim()
+          foreach($value in @($sdk,$web)){
+            if($value-notmatch'^[^/\s]+/[^/\s]+$'){throw 'private project registry entry rejected'}
+            Write-Host "::add-mask::$value"
+          }
+          "sdk_repo=$sdk" >> $env:GITHUB_OUTPUT
+          "web_repo=$web" >> $env:GITHUB_OUTPUT
+          Write-Host '[SOURCE-WATCH][REGISTRY][OK]'
+
+      - name: Open SDK tracker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.registry.outputs.sdk_repo }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: sdk
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+          sparse-checkout: |
+            sdk/ANO_SDK.hpp
+          sparse-checkout-cone-mode: false
+
+      - name: Open Web tracker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.registry.outputs.web_repo }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: web
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+          sparse-checkout: |
+            kyron-suite/v11.5.0/package.json
+          sparse-checkout-cone-mode: false
+
+      - name: Watch private source heads continuously
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dispatch_api='repos/pvtkyron/pantry-core/dispatches'
+
+          source_head() {
+            local root="$1" sha attempt
+            for attempt in 1 2 3 4 5; do
+              if git -C "$root" fetch --quiet --no-tags --prune origin '+refs/heads/main:refs/remotes/origin/main'; then
+                sha="$(git -C "$root" rev-parse refs/remotes/origin/main 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+                if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+                  printf '%s\n' "$sha"
+                  return 0
+                fi
+              fi
+              sleep $((attempt * 2))
+            done
+            echo "::error title=Private source watcher::unable to resolve ${root}/main through checkout credentials" >&2
+            return 1
+          }
+
+          dispatch_fresh_batch() {
+            jq -n '{event_type:"fresh-batch",client_payload:{source_watch:true}}' \
+              | gh api --method POST "$dispatch_api" --input - >/dev/null
+            echo '[SOURCE-WATCH][DISPATCHED] fresh-batch'
+          }
+
+          workspace_seen="$(source_head workspace)"
+          sdk_seen="$(source_head sdk)"
+          web_seen="$(source_head web)"
+          echo "[SOURCE-WATCH][READY] poll_seconds=${POLL_SECONDS}"
+
+          # No startup dispatch: the existing 07/37 schedule is the gap fallback.
+          # This watcher is the low-latency path for changes after it is live.
+          deadline=$((SECONDS + 20700))
+          while (( SECONDS < deadline )); do
+            sleep "$POLL_SECONDS"
+            workspace_next="$(source_head workspace)"
+            sdk_next="$(source_head sdk)"
+            web_next="$(source_head web)"
+
+            workspace_changed=false
+            sdk_changed=false
+            web_changed=false
+            [[ "$workspace_next" != "$workspace_seen" ]] && workspace_changed=true
+            [[ "$sdk_next" != "$sdk_seen" ]] && sdk_changed=true
+            [[ "$web_next" != "$web_seen" ]] && web_changed=true
+
+            if [[ "$workspace_changed" == false && "$sdk_changed" == false && "$web_changed" == false ]]; then
+              continue
+            fi
+
+            workspace_seen="$workspace_next"
+            sdk_seen="$sdk_next"
+            web_seen="$web_next"
+            echo "[SOURCE-WATCH][CHANGE] workspace=${workspace_changed} sdk=${sdk_changed} web=${web_changed}"
+            dispatch_fresh_batch
+          done
+
+          echo '[SOURCE-WATCH][ROTATE] watcher window complete'
