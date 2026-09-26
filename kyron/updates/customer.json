@@ -1,22 +1,30 @@
 {
-  "schema": 1,
+  "schema": 2,
   "product": "kyron-customer",
   "host": "pantry-core",
-  "updatedAt": "2026-09-26T00:00:00Z",
+  "downloadStrategy": "fixed-latest-url",
   "channels": {
     "stable": {
       "version": "10.1.12",
       "minVersion": "10.1.12",
       "mandatory": false,
-      "url": "https://github.com/pvtkyron/pantry-core/releases",
-      "notes": "Kyron Customer stable channel."
+      "url": "https://pvtkyron.github.io/pantry-core/kyron/downloads/kyron-customer-android-latest.zip",
+      "archiveUrl": "https://pvtkyron.github.io/pantry-core/kyron/releases/customer-android/kyron-customer-android-v10.1.12.zip",
+      "sha256": "c6a4ce709f57bc209faa64adb5506be837a3827ec358be06e17f676a578b1c76",
+      "size": 148691,
+      "filename": "kyron-customer-android-latest.zip",
+      "notes": "Kyron Customer Android stable channel."
     },
     "orion": {
       "version": "10.1.12",
       "minVersion": "10.1.12",
       "mandatory": false,
-      "url": "https://github.com/pvtkyron/pantry-core/releases",
-      "notes": "Kyron Customer Orion channel."
+      "url": "https://pvtkyron.github.io/pantry-core/kyron/downloads/kyron-orion-iphone-latest.zip",
+      "archiveUrl": "https://pvtkyron.github.io/pantry-core/kyron/releases/orion-iphone/kyron-orion-iphone-v10.1.12.zip",
+      "sha256": "20821913986ef11ddbbfe1f9e71ba1b7014058c342e429f12491d3ce2357cb34",
+      "size": 150084,
+      "filename": "kyron-orion-iphone-latest.zip",
+      "notes": "Kyron Customer Orion iPhone channel."
     }
   }
 }
