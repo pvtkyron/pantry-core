@@ -95,6 +95,45 @@ jobs:
           $trust=Join-Path $PWD.Path 'source\src\android\VeraInternal\jni\Protection\PantryLocalTrust.generated.hpp';if(!(Test-Path -LiteralPath $trust -PathType Leaf)){throw 'VeraInternal generated Pantry trust header is unavailable'}
           Write-Host '[PROJECT/WORKSPACE/LIB/TRUST][OK] canonical local-machine-v1 header materialized'
 
+      - name: Materialize canonical native code signer
+        shell: pwsh
+        env:
+          PFX_B64: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
+          PFX_PASS: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+          CERT_EXPECTED: ${{ secrets.KYRON_CODESIGN_CERT_SHA256 }}
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($n in @('PFX_B64','PFX_PASS','CERT_EXPECTED')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical code signer input missing: $n"}}
+          $expected=$env:CERT_EXPECTED.Trim().ToLowerInvariant()
+          if($expected-notmatch'^[0-9a-f]{64}$'){throw 'canonical code signer SHA256 pin is invalid'}
+          function CertSha256([Security.Cryptography.X509Certificates.X509Certificate2]$Cert){$sha=[Security.Cryptography.SHA256]::Create();try{return ([BitConverter]::ToString($sha.ComputeHash($Cert.RawData))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}}
+          function OpenStore([string]$Name){$s=[Security.Cryptography.X509Certificates.X509Store]::new($Name,[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser);$s.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite);return $s}
+          $root=Join-Path $env:RUNNER_TEMP 'kyron-native-codesign';New-Item -ItemType Directory -Force -Path $root|Out-Null
+          $pfx=Join-Path $root 'canonical.pfx';[IO.File]::WriteAllBytes($pfx,[Convert]::FromBase64String($env:PFX_B64))
+          $flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet -bor [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet -bor [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
+          $cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$env:PFX_PASS,$flags)
+          $actual=CertSha256 $cert
+          if($actual-ne$expected){throw "canonical code signer pin mismatch: actual=$actual expected=$expected"}
+          if(!$cert.HasPrivateKey){throw 'canonical code signer PFX does not expose a private key'}
+          $thumb=([string]$cert.Thumbprint).Replace(' ','').ToUpperInvariant()
+          if($thumb-notmatch'^[0-9A-F]{40}$'){throw 'canonical code signer thumbprint is invalid'}
+          $state=[ordered]@{expected=$expected;thumbprint=$thumb;pfx=$pfx;added_my=$false;added_root=$false;added_publisher=$false}
+          $stores=@{}
+          try{
+            foreach($name in @('My','Root','TrustedPublisher')){$stores[$name]=OpenStore $name}
+            $private=@($stores.My.Certificates|Where-Object{(CertSha256 $_)-eq$expected-and$_.HasPrivateKey})
+            if($private.Count-eq0){$stores.My.Add($cert);$state.added_my=$true}
+            if(@($stores.Root.Certificates|Where-Object{(CertSha256 $_)-eq$expected}).Count-eq0){$stores.Root.Add($cert);$state.added_root=$true}
+            if(@($stores.TrustedPublisher.Certificates|Where-Object{(CertSha256 $_)-eq$expected}).Count-eq0){$stores.TrustedPublisher.Add($cert);$state.added_publisher=$true}
+          }finally{foreach($s in $stores.Values){$s.Close();$s.Dispose()}}
+          $verify=OpenStore 'My'
+          try{$matches=@($verify.Certificates|Where-Object{(CertSha256 $_)-eq$expected-and$_.HasPrivateKey});if($matches.Count-lt1){throw 'canonical code signer private key was not materialized in CurrentUser/My'}}finally{$verify.Close();$verify.Dispose()}
+          $statePath=Join-Path $root 'state.json';$state|ConvertTo-Json -Compress|Set-Content -LiteralPath $statePath -Encoding utf8
+          "KYRON_NATIVE_CODESIGN_STATE=$statePath" >> $env:GITHUB_ENV
+          "KYRON_CODESIGN_PFX=$pfx" >> $env:GITHUB_ENV
+          "KYRON_CODESIGN_PASSWORD=$env:PFX_PASS" >> $env:GITHUB_ENV
+          Write-Host "[PROJECT/WORKSPACE/LIB/CODESIGN][OK] cert=$expected private_key=CurrentUser/My"
+
       - name: Chill toolchains
         uses: actions/cache@v6.1.0
         with:
@@ -162,6 +201,23 @@ jobs:
           retention-days: 1
           compression-level: 0
           overwrite: true
+
+      - name: Remove ephemeral native code signer
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $statePath=$env:KYRON_NATIVE_CODESIGN_STATE
+          if([string]::IsNullOrWhiteSpace($statePath)-or!(Test-Path -LiteralPath $statePath -PathType Leaf)){return}
+          $state=Get-Content -LiteralPath $statePath -Raw|ConvertFrom-Json
+          function CertSha256([Security.Cryptography.X509Certificates.X509Certificate2]$Cert){$sha=[Security.Cryptography.SHA256]::Create();try{return ([BitConverter]::ToString($sha.ComputeHash($Cert.RawData))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}}
+          foreach($entry in @(@('My',[bool]$state.added_my),@('Root',[bool]$state.added_root),@('TrustedPublisher',[bool]$state.added_publisher))){
+            if(!$entry[1]){continue}
+            $store=[Security.Cryptography.X509Certificates.X509Store]::new([string]$entry[0],[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+            try{$store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite);foreach($cert in @($store.Certificates.Find([Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,[string]$state.thumbprint,$false))){if((CertSha256 $cert)-eq([string]$state.expected).ToLowerInvariant()){$store.Remove($cert)}}}finally{$store.Close();$store.Dispose()}
+          }
+          if(Test-Path -LiteralPath ([string]$state.pfx) -PathType Leaf){$len=(Get-Item -LiteralPath ([string]$state.pfx)).Length;if($len-gt0){[IO.File]::WriteAllBytes([string]$state.pfx,(New-Object byte[] $len))}}
+          $root=Split-Path -Parent $statePath;if(Test-Path -LiteralPath $root -PathType Container){Remove-Item -LiteralPath $root -Recurse -Force}
+          Write-Host '[PROJECT/WORKSPACE/LIB/CODESIGN][CLEAN] ephemeral signer removed'
 
       - name: Remove ephemeral Pantry trust material
         if: ${{ always() }}
