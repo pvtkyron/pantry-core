@@ -21,6 +21,8 @@ jobs:
     name: Watch Pantry main and dispatch mirror
     runs-on: ubuntu-24.04
     timeout-minutes: 350
+    env:
+      POLL_SECONDS: '10'
     steps:
       - name: Open private Pantry tracker
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -73,13 +75,13 @@ jobs:
           # without a prepare/build. This also closes any watcher-restart gap.
           last_seen="$(pantry_sha)"
           dispatch_mirror "$last_seen"
-          echo "[PANTRY-WATCH][READY] pantry=${last_seen} poll_seconds=10"
+          echo "[PANTRY-WATCH][READY] pantry=${last_seen} poll_seconds=${POLL_SECONDS}"
 
-          # Poll every 10 seconds. A scheduled replacement starts every four
-          # hours and cancels the older watcher after the new run is queued.
+          # A scheduled replacement starts every four hours and cancels the
+          # older watcher after the new run is queued.
           deadline=$((SECONDS + 20700))
           while (( SECONDS < deadline )); do
-            sleep 10
+            sleep "$POLL_SECONDS"
             next="$(pantry_sha)"
             if [[ "$next" == "$last_seen" ]]; then
               continue
