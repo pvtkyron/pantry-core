@@ -1,0 +1,97 @@
+name: Pantry Instant Watch
+# Manual mirror kick: sync-55ffb12 prepare canonical Pantry into opaque kyron/xx/xx/*.bin records without rebuilding Workspace artifacts.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pantry-watch.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '11 0,4,8,12,16,20 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pantry-instant-watch
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: Watch Pantry main and dispatch mirror
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      POLL_SECONDS: '10'
+    steps:
+      - name: Open private Pantry tracker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pvtkyron/pantry
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: main
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+          sparse-checkout: |
+            SrcVersion.ini
+          sparse-checkout-cone-mode: false
+
+      - name: Watch Pantry SHA continuously
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dispatch_api='repos/pvtkyron/pantry-core/dispatches'
+
+          pantry_sha() {
+            local sha attempt
+            for attempt in 1 2 3 4 5; do
+              if git -C filling fetch --quiet --no-tags --prune origin '+refs/heads/main:refs/remotes/origin/main'; then
+                sha="$(git -C filling rev-parse refs/remotes/origin/main 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+                if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+                  printf '%s\n' "$sha"
+                  return 0
+                fi
+              fi
+              sleep $((attempt * 2))
+            done
+            echo '::error title=Pantry watcher::unable to resolve private Pantry main through checkout credentials' >&2
+            return 1
+          }
+
+          dispatch_mirror() {
+            local sha="$1"
+            jq -n --arg sha "$sha" '{event_type:"pantry-updated",client_payload:{pantry_sha:$sha}}' \
+              | gh api --method POST "$dispatch_api" --input - >/dev/null
+            echo "[PANTRY-WATCH][DISPATCHED] pantry=${sha}"
+          }
+
+          # Startup dispatch is intentional. pantry-mirror owns authoritative
+          # Pantry-Source comparison, so an already-published SHA exits there
+          # without a prepare/build. This also closes any watcher-restart gap.
+          last_seen="$(pantry_sha)"
+          dispatch_mirror "$last_seen"
+          echo "[PANTRY-WATCH][READY] pantry=${last_seen} poll_seconds=${POLL_SECONDS}"
+
+          # A scheduled replacement starts every four hours and cancels the
+          # older watcher after the new run is queued.
+          deadline=$((SECONDS + 20700))
+          while (( SECONDS < deadline )); do
+            sleep "$POLL_SECONDS"
+            next="$(pantry_sha)"
+            if [[ "$next" == "$last_seen" ]]; then
+              continue
+            fi
+
+            previous="$last_seen"
+            last_seen="$next"
+            echo "[PANTRY-WATCH][CHANGE] from=${previous} to=${next}"
+            dispatch_mirror "$next"
+          done
+
+          echo '[PANTRY-WATCH][ROTATE] watcher window complete'

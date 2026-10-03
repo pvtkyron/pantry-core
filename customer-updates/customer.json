@@ -1,0 +1,29 @@
+{
+  "schema": 3,
+  "product": "kyron-customer",
+  "host": "pantry-core",
+  "namespace": "customer-updates",
+  "downloadStrategy": "fixed-latest-url",
+  "channels": {
+    "stable": {
+      "version": "10.1.31",
+      "minVersion": "10.1.12",
+      "mandatory": true,
+      "url": "https://raw.githubusercontent.com/pvtkyron/pantry-core/main/customer-updates/downloads/kyron-customer-android-latest.zip",
+      "sha256": "8bac147fb6c072e188c6c8de3ca5d3cdb06f35de2dfb24a065508bcf65944227",
+      "size": 172924,
+      "filename": "kyron-customer-android-latest.zip",
+      "notes": "Kyron Customer Android 10.1.31 · internal build 10.1.31-r1 · strict selected-tab ownership, refresh-race recovery, bounded privacy hydration, native Add new project/project-chat creation, and preserved Settings/Profile/Library/Apps protection."
+    },
+    "orion": {
+      "version": "10.1.31",
+      "minVersion": "10.1.12",
+      "mandatory": true,
+      "url": "https://raw.githubusercontent.com/pvtkyron/pantry-core/main/customer-updates/downloads/kyron-orion-iphone-latest.zip",
+      "sha256": "0f49ffbd21b281b6b5bacad4c2ffe04c45151db952386bcc78acd812defd7872",
+      "size": 172821,
+      "filename": "kyron-orion-iphone-latest.zip",
+      "notes": "Kyron Orion iPhone 10.1.31 · internal build 10.1.31-r1 · Android-parity strict selected-tab ownership, refresh-race recovery, bounded privacy hydration, native Add new project/project-chat creation, and preserved Settings/Profile/Library/Apps protection."
+    }
+  }
+}

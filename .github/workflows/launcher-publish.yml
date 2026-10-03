@@ -1,0 +1,224 @@
+name: Kyron Canonical Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/launcher-publish.trigger'
+      - '.github/workflows/launcher-publish.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: launcher-pantry-core-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build sign prepare and publish canonical release
+    runs-on: windows-2025
+    timeout-minutes: 360
+    env:
+      KYRON_SERIAL_BUILD: '1'
+      KYRON_BUILD_JOBS: '2'
+      KYRON_MSBUILD_TIMEOUT_SECONDS: '1200'
+      KYRON_SLICE_TIMEOUT_SECONDS: '3600'
+      KYRON_HEARTBEAT_SECONDS: '30'
+      ANDROID_HOME: ''
+      ANDROID_SDK_ROOT: ''
+      ANDROID_NDK_HOME: ''
+      ANDROID_NDK_ROOT: ''
+      NDK_ROOT: ''
+      JAVA_HOME: ''
+    steps:
+      - name: Open Pantry Core publish target
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: shelf
+          fetch-depth: 1
+          persist-credentials: true
+          show-progress: false
+
+      - name: Open canonical Workspace
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pvtkyron/Workspace
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: source
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+
+      - name: Open canonical Pantry
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pvtkyron/pantry
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: main
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+
+      - name: Bind canonical release branches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($repo in @('source','filling','shelf')){
+            & git -C $repo checkout -q -B main HEAD
+            if($LASTEXITCODE){throw "release main binding rejected: $repo"}
+          }
+
+      - name: Materialize canonical Pantry signer
+        shell: pwsh
+        env:
+          CREAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+          CREAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+          JAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+          JAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($n in @('CREAM_A','CREAM_B','JAM_A','JAM_B')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical local Pantry signer input missing: $n"}}
+          . .\source\scripts\workspace-common.ps1
+          $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1'
+          New-Item -ItemType Directory -Force -Path $root|Out-Null
+          $utf8=[Text.UTF8Encoding]::new($false)
+          foreach($x in @(@('bootstrap_root_private.pem','CREAM_A'),@('bootstrap_root_public.pem','CREAM_B'),@('content_private.pem','JAM_A'),@('content_public.pem','JAM_B'))){[IO.File]::WriteAllText((Join-Path $root $x[0]),([Environment]::GetEnvironmentVariable($x[1])).Trim()+"`n",$utf8)}
+          & .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -Workspace (Join-Path $PWD.Path 'source') -ExpectedProfile local-machine-v1 -Ephemeral -RequireExistingIdentity|Out-Null
+          if(!$?){throw 'Canonical local Pantry signer validation failed'}
+      - name: Materialize canonical code signer
+        shell: pwsh
+        env:
+          KYRON_CODESIGN_PFX_BASE64: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
+          KYRON_CODESIGN_PASSWORD_SECRET: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PFX_BASE64)){Write-Host '::error title=Canonical code signer::canonical signing secret unavailable: KYRON_CODESIGN_PFX_BASE64';throw 'canonical signing secret unavailable: KYRON_CODESIGN_PFX_BASE64'}
+          if([string]::IsNullOrWhiteSpace($env:KYRON_CODESIGN_PASSWORD_SECRET)){Write-Host '::error title=Canonical code signer::canonical signing secret unavailable: KYRON_CODESIGN_PASSWORD';throw 'canonical signing secret unavailable: KYRON_CODESIGN_PASSWORD'}
+          Write-Host "::add-mask::$($env:KYRON_CODESIGN_PFX_BASE64)"
+          Write-Host "::add-mask::$($env:KYRON_CODESIGN_PASSWORD_SECRET)"
+          $pfx=Join-Path $env:RUNNER_TEMP 'kyron-canonical.pfx'
+          try{$raw=[Convert]::FromBase64String($env:KYRON_CODESIGN_PFX_BASE64)}catch{Write-Host '::error title=Canonical code signer::canonical signing PFX base64 is invalid';throw 'canonical signing PFX base64 is invalid'}
+          [IO.File]::WriteAllBytes($pfx,$raw)
+          $meta=Get-Content -LiteralPath './source/security/signing/canonical-signer.json' -Raw|ConvertFrom-Json
+          $flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+          $signingPassword=$env:KYRON_CODESIGN_PASSWORD_SECRET.TrimEnd([char[]]"`r`n")
+          try{$cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$signingPassword,$flags)}catch{Write-Host '::error title=Canonical code signer::canonical signing PFX could not be opened';throw 'canonical signing PFX could not be opened'}
+          try{
+            if(!$cert.HasPrivateKey){Write-Host '::error title=Canonical code signer::canonical signing PFX has no private key';throw 'canonical signing PFX has no private key'}
+            $sha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($cert.RawData)).ToLowerInvariant()
+            if($sha-ne([string]$meta.certificate_sha256).ToLowerInvariant()){Write-Host '::error title=Canonical code signer::canonical signing certificate SHA-256 mismatch';throw 'canonical signing certificate SHA-256 mismatch'}
+            if(($cert.Thumbprint-replace'\s','').ToLowerInvariant()-ne([string]$meta.thumbprint_sha1).ToLowerInvariant()){Write-Host '::error title=Canonical code signer::canonical signing certificate SHA-1 mismatch';throw 'canonical signing certificate SHA-1 mismatch'}
+            $rsa=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($cert)
+            if($null-eq$rsa-or$rsa.KeySize-ne2048){Write-Host '::error title=Canonical code signer::canonical signing certificate RSA key mismatch';throw 'canonical signing certificate RSA key mismatch'}
+            $mod=$rsa.ExportParameters($false).Modulus
+            $modSha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($mod)).ToLowerInvariant()
+            if($modSha-ne([string]$meta.public_modulus_sha256).ToLowerInvariant()){Write-Host '::error title=Canonical code signer::canonical signing public modulus mismatch';throw 'canonical signing public modulus mismatch'}
+            $cer=Join-Path $env:RUNNER_TEMP 'kyron-canonical.cer';[IO.File]::WriteAllBytes($cer,$cert.RawData)
+            foreach($storeName in @('Root','TrustedPublisher')){& certutil.exe -f -addstore $storeName $cer|Out-Host;if($LASTEXITCODE){throw "canonical signer trust import failed: $storeName rc=$LASTEXITCODE"}}
+            Write-Host "[SIGNING/CANONICAL][OK] certificate_sha256=$sha trust=LocalMachine"
+          }finally{
+            if($null-ne$rsa){$rsa.Dispose()}
+            $cert.Dispose()
+            [Security.Cryptography.CryptographicOperations]::ZeroMemory($raw)
+          }
+
+      - name: Chill Workspace toolchains
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            *-sdk/Android
+            *-sdk/Java
+            *-sdk/Smali
+            *-sdk/LLVMMinGW
+          key: workspace-toolchains-v7-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
+
+      - name: Chill publisher Python
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: '*-sdk/Python'
+          key: pantry-publisher-python-v3-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
+
+      - name: Install managed .NET 8 SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Bind managed SDK to canonical Workspace root
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          . .\source\scripts\workspace-common.ps1
+          $sdk=Resolve-WorkspaceSdkRoot
+          $dotnet=(Get-Command dotnet.exe -ErrorAction Stop).Source
+          $target=Join-Path $sdk 'dotnet\current'
+          New-Item -ItemType Directory -Force (Split-Path $target -Parent)|Out-Null
+          if(!(Test-Path -LiteralPath $target -PathType Container)){New-Item -ItemType Junction -Path $target -Target (Split-Path $dotnet -Parent)|Out-Null}
+          $bound=Join-Path $target 'dotnet.exe'
+          if(!(Test-Path -LiteralPath $bound -PathType Leaf)){throw 'Canonical managed .NET SDK binding is unavailable'}
+          $versions=@(& $bound --list-sdks)
+          if(!@($versions|Where-Object{$_ -match '^8\.0\.'}).Count){throw 'Canonical managed .NET 8 SDK is unavailable'}
+          Write-Host '[TOOLCHAIN][DOTNET][OK] canonical SDK root bound to .NET 8'
+
+      - name: Ensure canonical Workspace toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\source\scripts\ensure-workspace-toolchain.ps1
+          if(!$?){throw 'Canonical Workspace toolchain bootstrap failed'}
+
+      - name: Build sign prepare and publish Pantry Core
+        shell: pwsh
+        env:
+          KYRON_CODESIGN_PFX: ${{ runner.temp }}\kyron-canonical.pfx
+          KYRON_CODESIGN_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+          KYRON_PANTRY_SIGNER_PROFILE: local-machine-v1
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:KYRON_PANTRY_CORE_ROOT=Join-Path $PWD.Path 'shelf'
+          $entry=Join-Path $PWD.Path 'source\PREPARE_AND_PUBLISH_PANTRY_CORE.bat'
+          $recipe=Join-Path $PWD.Path 'source\PantryPublisher\Run-PantryRelease.ps1'
+          $recipeSha=(Get-FileHash -LiteralPath $recipe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "[PANTRY][RECIPE] owner=Run-PantryRelease.ps1 mode=full-local-release sha256=$recipeSha"
+          $releaseLog=Join-Path $env:RUNNER_TEMP 'canonical-release.log'
+          try {
+          & $entry -PantryPath (Join-Path $PWD.Path 'filling') -PantryCorePath (Join-Path $PWD.Path 'shelf') -RunId ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) -RunAttempt ([int]'${{ github.run_attempt }}') -RuntimeChannel both -IncludeLauncher 2>&1 | Tee-Object -FilePath $releaseLog
+            $code=$LASTEXITCODE
+            if($code){
+              $safe='canonical release entrypoint failed'
+              $raw=@(Get-Content -LiteralPath $releaseLog -ErrorAction SilentlyContinue)
+              $clean=@($raw|Where-Object{$_ -notmatch '(?i)(password|secret|token|authorization|private[ _-]?key|capsule|FullyQualifiedErrorId|CategoryInfo|^\s*At .+ line:)'})
+              $candidate=@($clean|Where-Object{$_ -match '(?i)(fatal error|error (?:C|LNK|MSB|NETSDK|NU|CS)\d+|:\s*error\s*:|linker command failed|ninja:.*failed|make:\s*\*\*\*|ndk-build.*(?:error|fail))'}|Select-Object -Last 1)
+              if(!$candidate.Count){$candidate=@($clean|Where-Object{$_ -notmatch '(?i)\[PANTRY\]\[(?:ATTEMPT|ACTION)\]' -and $_ -match '(?i)(error|fail|missing|invalid|rejected|mismatch|requires|cannot|could not|forbidden|not recognized|the term)'}|Select-Object -Last 2)}
+              if($candidate.Count){$safe=((@($candidate)-join' | ')-replace '[A-Za-z0-9+/=]{80,}','[redacted]').Trim()}
+              if($safe.Length-gt600){$safe=$safe.Substring(0,600)}
+              $safe=$safe.Replace('%2','%252').Replace('%3','%253').Replace("`r",'%0D').Replace("`n",'%0A')
+              Write-Host ('::error title=Canonical Kyron release rejected::{0}' -f $safe)
+            }
+          } catch {
+            $msg=[regex]::Replace([string]$_.Exception.Message,'[\r\n]+',' ')
+            if($msg.Length -gt 800){$msg=$msg.Substring(0,800)}
+            $msg=$msg.Replace('%','%25')
+            Write-Host ('::error title=Canonical Kyron release rejected::{0}' -f $msg)
+            throw
+          }
+          if($code){Write-Host ('::error title=Canonical Kyron release rejected::Canonical runner exit code {0}' -f $code);exit $code}
+          Write-Host '[PANTRY/RELEASE-PUBLISH][OK] full local-equivalent transaction complete'
+
+      - name: Remove ephemeral canonical signer
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $metaPath='./source/security/signing/canonical-signer.json'
+          if(Test-Path -LiteralPath $metaPath -PathType Leaf){$meta=Get-Content -LiteralPath $metaPath -Raw|ConvertFrom-Json;$thumb=([string]$meta.thumbprint_sha1-replace'\s','').ToUpperInvariant();foreach($storeName in @('TrustedPublisher','Root')){& certutil.exe -delstore $storeName $thumb|Out-Null}}
+          foreach($leaf in @('kyron-canonical.cer','kyron-canonical.pfx')){$path=Join-Path $env:RUNNER_TEMP $leaf;if(Test-Path -LiteralPath $path -PathType Leaf){[IO.File]::WriteAllBytes($path,(New-Object byte[] ((Get-Item -LiteralPath $path).Length)));Remove-Item -LiteralPath $path -Force}}
+          . .\source\scripts\workspace-common.ps1
+          $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1'
+          foreach($name in @('bootstrap_root_private.pem','content_private.pem')){$q=Join-Path $root $name;if(Test-Path -LiteralPath $q -PathType Leaf){[IO.File]::WriteAllBytes($q,(New-Object byte[] ((Get-Item -LiteralPath $q).Length)))}}
+          if(Test-Path -LiteralPath $root -PathType Container){Remove-Item -LiteralPath $root -Recurse -Force}

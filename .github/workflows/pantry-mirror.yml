@@ -1,0 +1,284 @@
+name: Pantry mirror to Pantry Core
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [pantry-updated]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && 'launcher-pantry-core-publish-manual' || 'launcher-pantry-core-publish-root-v2' }}
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: Resolve Pantry source
+    runs-on: ubuntu-latest
+    outputs:
+      pantry_sha: ${{ steps.source.outputs.pantry_sha }}
+      needs_publish: ${{ steps.compare.outputs.needs_publish }}
+    steps:
+      - name: Open canonical Pantry
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pvtkyron/pantry
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: main
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: |
+            SrcVersion.ini
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve Pantry source
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git -C filling rev-parse HEAD | tr '[:upper:]' '[:lower:]')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "pantry_sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "[PANTRY-MIRROR][READY] source=$sha"
+
+      - name: Compare current published Pantry source
+        id: compare
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source_sha="${{ steps.source.outputs.pantry_sha }}"
+          published="$(
+            gh api "repos/${GITHUB_REPOSITORY}/commits?sha=main&per_page=50" \
+              --jq '[.[] | .commit.message | capture("Pantry-Source: (?<sha>[0-9a-f]{40})")? | select(.sha != null) | .sha][0] // ""'
+          )"
+          if [[ "$published" == "$source_sha" ]]; then
+            echo "needs_publish=false" >> "$GITHUB_OUTPUT"
+            echo "[PANTRY-MIRROR][NOOP] source=$source_sha already_published=$published"
+          else
+            echo "needs_publish=true" >> "$GITHUB_OUTPUT"
+            echo "[PANTRY-MIRROR][PUBLISH] source=$source_sha previous=${published:-none}"
+          fi
+
+  publish:
+    name: Prepare verify and publish full Pantry snapshot
+    needs: detect
+    if: ${{ needs.detect.outputs.needs_publish == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Open Pantry Core Kyron publish target
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf shelf
+          git init shelf
+          git -C shelf remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          gh auth setup-git
+          git -C shelf fetch --no-tags --depth=1 origin main
+          git -C shelf sparse-checkout init --no-cone
+          printf '/kyron/\n' > shelf/.git/info/sparse-checkout
+          git -C shelf checkout -B main FETCH_HEAD
+          git -C shelf config gc.auto 0
+          git -C shelf status --short
+
+      - name: Open Bootstrap transport contract without compiling Workspace
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pvtkyron/Workspace
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: source
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: |
+            PantryPublisher/prepare_pantry_core_legacy.py
+            src/windows/Bootstrap/jni/security/trust/BootstrapTransportKey.hpp
+            src/windows/Bootstrap/jni/build/BuildSeed.hpp
+          sparse-checkout-cone-mode: false
+
+      - name: Open exact Pantry revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pvtkyron/pantry
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: ${{ needs.detect.outputs.pantry_sha }}
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify pinned Pantry and full source roots
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git -C filling rev-parse HEAD | tr '[:upper:]' '[:lower:]')"
+          test "$actual" = "${{ needs.detect.outputs.pantry_sha }}"
+          for root in lua assest Font img lib nativebridge client auth tools tests; do
+            test -d "filling/$root" || { echo "::error::Pantry source root missing: $root"; exit 1; }
+          done
+          test -s filling/lib/libkyron.so
+          test -s filling/lib/libkyron64.so
+          test -s filling/client/Bootstrap.exe
+          test -s filling/client/KyronCoreService.exe
+          grep -F 'AUTO_ROUTE_BEGIN="; pantry-auto-content-routes:begin"' filling/tools/rotate_runtime_routes.py >/dev/null
+          grep -F 'GENERIC_ROUTE_ROOTS=(' filling/tools/rotate_runtime_routes.py >/dev/null
+          grep -F 'CLIENT_SOURCE="client/launch-plane-only.marker"' filling/tools/rotate_runtime_routes.py >/dev/null
+          grep -F '"client_record":addressed("policy","launcher-disabled"' filling/tools/rotate_runtime_routes.py >/dev/null
+          echo "[PANTRY-MIRROR][ROUTES][OK] generic children and client marker are content-addressed"
+          lua_count="$(find filling/lua -type f | wc -l)"
+          asset_count="$(find filling/assest -type f | wc -l)"
+          native_count="$(find filling/lib filling/nativebridge -type f | wc -l)"
+          echo "[PANTRY-MIRROR][INPUTS][OK] source=$actual lua=$lua_count assets=$asset_count native=$native_count"
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install verified Pantry Python dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          requirements="filling/tools/requirements-launch.txt"
+          test -s "$requirements"
+          python -m pip install --disable-pip-version-check --no-input -r "$requirements"
+          deps_sha="$(sha256sum "$requirements" | awk '{print $1}')"
+          [[ "$deps_sha" =~ ^[0-9a-f]{64}$ ]]
+          echo "KYRON_PANTRY_DEPENDENCIES_VERIFIED_SHA256=$deps_sha" >> "$GITHUB_ENV"
+          python -c 'import cryptography,lz4'
+          echo "[PANTRY-MIRROR][PYTHON][OK] requirements=$deps_sha"
+
+      - name: Install Lua 5.3 compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends lua5.3
+          luac5.3 -v 2>&1 | grep -F 'Lua 5.3.6'
+          echo "[PANTRY-MIRROR][LUA53][OK] compiler=$(command -v luac5.3)"
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android command-line tools
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+
+      - name: Ensure Pantry Android compile surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          android_home="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          sdkmanager="$android_home/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$sdkmanager" ]]; then
+            sdkmanager="$(find "$android_home/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | sort -V | tail -n 1)"
+          fi
+          [[ -n "$sdkmanager" && -x "$sdkmanager" ]] || { echo "::error::sdkmanager not found under $android_home/cmdline-tools"; exit 1; }
+          yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$sdkmanager" "platforms;android-34" "build-tools;34.0.0"
+          test -f "$android_home/platforms/android-34/android.jar"
+          test -f "$android_home/build-tools/34.0.0/lib/d8.jar"
+          echo "ANDROID_HOME=$android_home" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$android_home" >> "$GITHUB_ENV"
+          echo "[PANTRY-MIRROR][ANDROID][OK] home=$android_home sdkmanager=$sdkmanager"
+
+      - name: Materialize signer public keys
+        id: signer
+        shell: bash
+        env:
+          ROOT_PUBLIC: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+          CONTENT_PUBLIC: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          root=Path(os.environ["RUNNER_TEMP"])/"pantry-bootstrap-public.pem"
+          content=Path(os.environ["RUNNER_TEMP"])/"pantry-content-public.pem"
+          for path,name in ((root,"ROOT_PUBLIC"),(content,"CONTENT_PUBLIC")):
+              value=os.environ.get(name,"").strip()
+              if "BEGIN PUBLIC KEY" not in value:
+                  raise SystemExit(f"{name} is missing or invalid")
+              path.write_text(value+"\n",encoding="utf-8",newline="\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a",encoding="utf-8") as out:
+              print(f"root_public={root}",file=out)
+              print(f"content_public={content}",file=out)
+          PY
+
+      - name: Reconstruct Bootstrap transport master without compiling Workspace
+        id: master
+        shell: bash
+        run: |
+          set -euo pipefail
+          master="$(python source/PantryPublisher/prepare_pantry_core_legacy.py --workspace source --print-transport-master | tail -n 1 | tr -d '\r\n')"
+          [[ "$master" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::transport master reconstruction failed"; exit 1; }
+          echo "::add-mask::$master"
+          echo "master=$master" >> "$GITHUB_OUTPUT"
+          echo "[PANTRY-MIRROR][TRANSPORT][OK] Workspace read-only; no Workspace build"
+
+      - name: Prepare and publish Pantry directly
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KYRON_PANTRY_SIGNER_PROFILE: local-machine-v1
+          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+          KYRON_BOOTSTRAP_ROOT_PUBLIC_PEM: ${{ steps.signer.outputs.root_public }}
+          KYRON_CONTENT_PUBLIC_PEM: ${{ steps.signer.outputs.content_public }}
+          KYRON_PREVIOUS_CONTENT_PUBLIC_PEM: ${{ github.workspace }}/filling/security/keys/content_public.pem
+          KYRON_PREVIOUS_CONTENT_PUBLIC_SHA256: 8889fca2bdc4f5294227da85b0a18e29dce10b434ef5a398a56ecb9492c187aa
+          KYRON_LAUNCH_CAPSULE_MASTER_HEX: ${{ steps.master.outputs.master }}
+          KYRON_ANDROID_PLATFORM: android-34
+          KYRON_ANDROID_BUILD_TOOLS: 34.0.0
+        run: |
+          set -euo pipefail
+          python filling/tools/prepare_snapshot.py \
+            --source filling \
+            --cdn shelf \
+            --source-sha "${{ needs.detect.outputs.pantry_sha }}" \
+            --run-id "$(date -u +%s%3N)" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --branch main
+
+      - name: Verify published Pantry Core contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C shelf fetch --quiet --force origin main
+          remote="$(git -C shelf rev-parse refs/remotes/origin/main)"
+          message="$(git -C shelf show -s --format=%B "$remote")"
+          grep -Fxq "Pantry-Source: ${{ needs.detect.outputs.pantry_sha }}" <<<"$message"
+          grep -Fxq "History-Mode: root-only" <<<"$message"
+          git -C shelf cat-file -e "$remote:.github/workflows/pantry-mirror.yml"
+          test "$(git -C shelf rev-list --parents -n 1 "$remote" | wc -w | tr -d ' ')" -eq 1
+          tracked="$(git -C shelf ls-tree -r --name-only "$remote" | wc -l | tr -d ' ')"
+          refreshed="$(git -C shelf diff-tree --root --no-commit-id --name-only -r "$remote" | wc -l | tr -d ' ')"
+          test "$tracked" -gt 0
+          test "$refreshed" -eq "$tracked"
+          grep -Fxq "Refreshed-Paths: $tracked" <<<"$message"
+          unsupported="$(git -C shelf ls-tree -r "$remote" | awk '$1!="100644" || $2!="blob" {print $4}')"
+          test -z "$unsupported" || { echo "::error::root snapshot contains unsupported modes: $unsupported"; exit 1; }
+          bad="$(git -C shelf ls-tree -r --name-only "$remote" kyron | grep -Ev '^kyron/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{28}\.bin$' || true)"
+          test -z "$bad" || { echo "::error::non-opaque Kyron path: $bad"; exit 1; }
+          records="$(git -C shelf ls-tree -r --name-only "$remote" kyron | grep -Ec '^kyron/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{28}\.bin$' || true)"
+          test "$records" -gt 0
+          echo "[PANTRY-MIRROR][PUBLISHED][OK] source=${{ needs.detect.outputs.pantry_sha }} commit=$remote records=$records refreshed=$refreshed history=1"
+
+      - name: Remove temporary signer public keys
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/pantry-bootstrap-public.pem" "$RUNNER_TEMP/pantry-content-public.pem"

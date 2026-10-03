@@ -1,0 +1,234 @@
+name: Workspace native library lane
+
+on:
+  workflow_call:
+    inputs:
+      capsule:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Compile Android native libraries
+    runs-on: windows-2025
+    timeout-minutes: 240
+    env:
+      KYRON_SERIAL_BUILD: '1'
+      KYRON_BUILD_JOBS: '2'
+      KYRON_HEARTBEAT_SECONDS: '30'
+      ANDROID_HOME: ''
+      ANDROID_SDK_ROOT: ''
+      ANDROID_NDK_HOME: ''
+      ANDROID_NDK_ROOT: ''
+      NDK_ROOT: ''
+      JAVA_HOME: ''
+    steps:
+      - name: Open lane recipe
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: |
+            .github/actions/private-capsule
+            .github/workflows/workspace-handoff.ps1
+
+      - name: Open private source state
+        id: state
+        uses: ./recipe/.github/actions/private-capsule
+        with:
+          mode: open
+          key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          capsule: ${{ inputs.capsule }}
+          project: workspace
+
+      - name: Open private Workspace
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.state.outputs.workspace_repo }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: ${{ steps.state.outputs.workspace_ref }}
+          path: source
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+
+      - name: Open pinned Pantry
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.state.outputs.pantry_repo }}
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: ${{ steps.state.outputs.pantry_ref }}
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+
+      - name: Bind release source branches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($repo in @('source','filling')){& git -C $repo checkout -q -B main HEAD;if($LASTEXITCODE){throw "release main binding rejected: $repo"}}
+
+      - name: Materialize canonical Pantry trust
+        shell: pwsh
+        env:
+          CREAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+          CREAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+          JAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+          JAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($n in @('CREAM_A','CREAM_B','JAM_A','JAM_B')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical local Pantry signer input missing: $n"}}
+          . .\source\scripts\workspace-common.ps1
+          $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1';New-Item -ItemType Directory -Force -Path $root|Out-Null;$utf8=[Text.UTF8Encoding]::new($false)
+          foreach($x in @(@('bootstrap_root_private.pem','CREAM_A'),@('bootstrap_root_public.pem','CREAM_B'),@('content_private.pem','JAM_A'),@('content_public.pem','JAM_B'))){[IO.File]::WriteAllText((Join-Path $root $x[0]),([Environment]::GetEnvironmentVariable($x[1])).Trim()+"`n",$utf8)}
+          & .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -Workspace (Join-Path $PWD.Path 'source') -ExpectedProfile local-machine-v1 -Ephemeral -RequireExistingIdentity|Out-Null
+          if(!$?){throw 'Canonical local Pantry trust generation failed'}
+          $trust=Join-Path $PWD.Path 'source\src\android\VeraInternal\jni\Protection\PantryLocalTrust.generated.hpp';if(!(Test-Path -LiteralPath $trust -PathType Leaf)){throw 'VeraInternal generated Pantry trust header is unavailable'}
+          Write-Host '[PROJECT/WORKSPACE/LIB/TRUST][OK] canonical local-machine-v1 header materialized'
+
+      - name: Materialize canonical native code signer
+        shell: pwsh
+        env:
+          PFX_B64: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
+          PFX_PASS: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($n in @('PFX_B64','PFX_PASS')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical code signer input missing: $n"}}
+          $metaPath=Join-Path $PWD.Path 'source\security\signing\canonical-signer.json'
+          if(!(Test-Path -LiteralPath $metaPath -PathType Leaf)){throw 'canonical signer metadata unavailable'}
+          $meta=Get-Content -LiteralPath $metaPath -Raw|ConvertFrom-Json
+          $expected=([string]$meta.certificate_sha256).Trim().ToLowerInvariant()
+          if($expected-notmatch'^[0-9a-f]{64}$'){throw 'canonical code signer SHA256 pin is invalid'}
+          function CertSha256([Security.Cryptography.X509Certificates.X509Certificate2]$Cert){$sha=[Security.Cryptography.SHA256]::Create();try{return ([BitConverter]::ToString($sha.ComputeHash($Cert.RawData))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}}
+          function OpenStore([string]$Name){$s=[Security.Cryptography.X509Certificates.X509Store]::new($Name,[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser);$s.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite);return $s}
+          $root=Join-Path $env:RUNNER_TEMP 'kyron-native-codesign';New-Item -ItemType Directory -Force -Path $root|Out-Null
+          $pfx=Join-Path $root 'canonical.pfx';$raw=[Convert]::FromBase64String($env:PFX_B64);[IO.File]::WriteAllBytes($pfx,$raw)
+          $flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet -bor [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet -bor [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
+          $password=$env:PFX_PASS.TrimEnd([char[]]"`r`n")
+          $cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$password,$flags)
+          $actual=CertSha256 $cert
+          if($actual-ne$expected){throw "canonical code signer pin mismatch: actual=$actual expected=$expected"}
+          if(!$cert.HasPrivateKey){throw 'canonical code signer PFX does not expose a private key'}
+          $thumb=([string]$cert.Thumbprint).Replace(' ','').ToUpperInvariant()
+          if($thumb-notmatch'^[0-9A-F]{40}$'){throw 'canonical code signer thumbprint is invalid'}
+          if(([string]$meta.thumbprint_sha1)-and(([string]$meta.thumbprint_sha1).Replace(' ','').ToUpperInvariant()-ne$thumb)){throw 'canonical code signer SHA1 thumbprint mismatch'}
+          $state=[ordered]@{expected=$expected;thumbprint=$thumb;pfx=$pfx;added_my=$false;added_root=$false;added_publisher=$false}
+          $stores=@{}
+          try{
+            foreach($name in @('My','Root','TrustedPublisher')){$stores[$name]=OpenStore $name}
+            $private=@($stores.My.Certificates|Where-Object{(CertSha256 $_)-eq$expected-and$_.HasPrivateKey})
+            if($private.Count-eq0){$stores.My.Add($cert);$state.added_my=$true}
+            if(@($stores.Root.Certificates|Where-Object{(CertSha256 $_)-eq$expected}).Count-eq0){$stores.Root.Add($cert);$state.added_root=$true}
+            if(@($stores.TrustedPublisher.Certificates|Where-Object{(CertSha256 $_)-eq$expected}).Count-eq0){$stores.TrustedPublisher.Add($cert);$state.added_publisher=$true}
+          }finally{foreach($s in $stores.Values){$s.Close();$s.Dispose()}}
+          $verify=OpenStore 'My'
+          try{$matches=@($verify.Certificates|Where-Object{(CertSha256 $_)-eq$expected-and$_.HasPrivateKey});if($matches.Count-lt1){throw 'canonical code signer private key was not materialized in CurrentUser/My'}}finally{$verify.Close();$verify.Dispose()}
+          $statePath=Join-Path $root 'state.json';$state|ConvertTo-Json -Compress|Set-Content -LiteralPath $statePath -Encoding utf8
+          "KYRON_NATIVE_CODESIGN_STATE=$statePath" >> $env:GITHUB_ENV
+          "KYRON_CODESIGN_PFX=$pfx" >> $env:GITHUB_ENV
+          "KYRON_CODESIGN_PASSWORD=$password" >> $env:GITHUB_ENV
+          [Security.Cryptography.CryptographicOperations]::ZeroMemory($raw)
+          Write-Host "[PROJECT/WORKSPACE/LIB/CODESIGN][OK] cert=$expected private_key=CurrentUser/My"
+
+      - name: Chill toolchains
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            *-sdk/Android
+            *-sdk/Java
+            *-sdk/Smali
+            *-sdk/LLVMMinGW
+          key: workspace-toolchains-v7-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
+
+      - name: Install managed .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Bind managed SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          . .\source\scripts\workspace-common.ps1
+          $sdk=Resolve-WorkspaceSdkRoot;$dotnet=(Get-Command dotnet.exe -ErrorAction Stop).Source;$target=Join-Path $sdk 'dotnet\current'
+          New-Item -ItemType Directory -Force (Split-Path $target -Parent)|Out-Null
+          if(!(Test-Path -LiteralPath $target -PathType Container)){New-Item -ItemType Junction -Path $target -Target (Split-Path $dotnet -Parent)|Out-Null}
+          if(!(Test-Path -LiteralPath (Join-Path $target 'dotnet.exe') -PathType Leaf)){throw 'Canonical managed .NET SDK binding is unavailable'}
+
+      - name: Ensure canonical Workspace toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\source\scripts\ensure-workspace-toolchain.ps1
+          if(!$?){throw 'Canonical Workspace toolchain bootstrap failed'}
+
+      - name: Compile VeraInternal libraries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:KYRON_PANTRY_ROOT=Join-Path $PWD.Path 'filling';$env:KYRON_PANTRY_SIGNER_PROFILE='local-machine-v1'
+          & .\source\src\android\VeraInternal\build.bat 'KYRON_MODE=release'
+          if($LASTEXITCODE){throw "VeraInternal release library lane failed rc=$LASTEXITCODE"}
+
+      - name: Compile NativeBridge library kit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $old=$env:KYRON_NONINTERACTIVE;try{$env:KYRON_NONINTERACTIVE='1';& .\source\src\android\NativeBridgeRuntime\build.bat;if($LASTEXITCODE){throw "NativeBridge release library lane failed rc=$LASTEXITCODE"}}finally{$env:KYRON_NONINTERACTIVE=$old}
+          Write-Host '[PROJECT/WORKSPACE/LIB][OK] VeraInternal + NativeBridge'
+
+      - name: Seal native library lane
+        id: shard
+        shell: pwsh
+        env:
+          KYRON_HANDOFF_SECRET: ${{ secrets[vars.MIX_KEY_NAME] }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $workspaceSha=(& git -C source rev-parse HEAD).Trim().ToLowerInvariant();$pantrySha=(& git -C filling rev-parse HEAD).Trim().ToLowerInvariant();$out=Join-Path $env:RUNNER_TEMP 'workspace-lib-handoff'
+          $paths=@('src\android\VeraInternal\lib\armeabi-v7a\libkyron.so','src\android\VeraInternal\lib\arm64-v8a\libkyron.so','src\android\NativeBridgeRuntime\lib')
+          & .\recipe\.github\workflows\workspace-handoff.ps1 -Mode pack -Lane lib -PantryRoot (Join-Path $PWD.Path 'filling') -WorkspaceSha $workspaceSha -PantrySha $pantrySha -Secret $env:KYRON_HANDOFF_SECRET -SourceRoot (Join-Path $PWD.Path 'source') -Paths $paths -OutputRoot $out
+
+      - name: Upload encrypted native lane
+        uses: actions/upload-artifact@v4
+        with:
+          name: kyron-workspace-lib-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.shard.outputs.root }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
+
+      - name: Remove ephemeral native code signer
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $statePath=$env:KYRON_NATIVE_CODESIGN_STATE
+          if([string]::IsNullOrWhiteSpace($statePath)-or!(Test-Path -LiteralPath $statePath -PathType Leaf)){return}
+          $state=Get-Content -LiteralPath $statePath -Raw|ConvertFrom-Json
+          function CertSha256([Security.Cryptography.X509Certificates.X509Certificate2]$Cert){$sha=[Security.Cryptography.SHA256]::Create();try{return ([BitConverter]::ToString($sha.ComputeHash($Cert.RawData))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}}
+          foreach($entry in @(@('My',[bool]$state.added_my),@('Root',[bool]$state.added_root),@('TrustedPublisher',[bool]$state.added_publisher))){
+            if(!$entry[1]){continue}
+            $store=[Security.Cryptography.X509Certificates.X509Store]::new([string]$entry[0],[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+            try{$store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite);foreach($cert in @($store.Certificates.Find([Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,[string]$state.thumbprint,$false))){if((CertSha256 $cert)-eq([string]$state.expected).ToLowerInvariant()){$store.Remove($cert)}}}finally{$store.Close();$store.Dispose()}
+          }
+          if(Test-Path -LiteralPath ([string]$state.pfx) -PathType Leaf){$len=(Get-Item -LiteralPath ([string]$state.pfx)).Length;if($len-gt0){[IO.File]::WriteAllBytes([string]$state.pfx,(New-Object byte[] $len))}}
+          $root=Split-Path -Parent $statePath;if(Test-Path -LiteralPath $root -PathType Container){Remove-Item -LiteralPath $root -Recurse -Force}
+          Write-Host '[PROJECT/WORKSPACE/LIB/CODESIGN][CLEAN] ephemeral signer removed'
+
+      - name: Remove ephemeral Pantry trust material
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          if(Test-Path '.\source\scripts\workspace-common.ps1'){
+            . .\source\scripts\workspace-common.ps1
+            $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1';if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}
+          }

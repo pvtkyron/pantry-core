@@ -1,0 +1,116 @@
+name: Kyron Sequential Source Pipeline
+run-name: "Kyron ${{ inputs.runtime_channel || 'both' }} / launcher=${{ github.event_name != 'workflow_dispatch' || inputs.include_launcher == true }} / ${{ github.event_name }}"
+# Public orchestration carries only encrypted private source state.
+# Pipeline generation: 4
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_channel:
+        description: Runtime channel to compile and publish
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - release
+          - insider
+      include_launcher:
+        description: Also rebuild Launcher (requires canonical PFX secret)
+        required: false
+        default: true
+        type: boolean
+  repository_dispatch:
+    types: [fresh-batch]
+  schedule:
+    - cron: '7,37 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patisserie.yml'
+      - '.github/workflows/source-pin.yml'
+      - '.github/workflows/project-sdk.yml'
+      - '.github/workflows/project-web.yml'
+      - '.github/workflows/project-workspace.yml'
+      - '.github/workflows/workspace-*.yml'
+      - '.github/workflows/workspace-handoff.ps1'
+      - '.github/workflows/box.yml'
+      - '.github/workflows/doctor.yml'
+      - '.github/workflows/headless.yml'
+      - '.github/actions/private-capsule/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kyron-source-pipeline-main
+  cancel-in-progress: true
+
+jobs:
+  sources:
+    name: 1 · Pin private sources
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[control-only]') }}
+    uses: ./.github/workflows/source-pin.yml
+    secrets: inherit
+
+  sdk:
+    name: 2 · SDK project
+    needs: sources
+    if: ${{ needs.sources.result == 'success' }}
+    uses: ./.github/workflows/project-sdk.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+    secrets: inherit
+
+  web:
+    name: 3 · Web project
+    needs: [sources, sdk]
+    if: ${{ needs.sdk.result == 'success' }}
+    uses: ./.github/workflows/project-web.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+    secrets: inherit
+
+  workspace:
+    name: 4 · Workspace build + publish
+    needs: [sources, web]
+    permissions:
+      contents: write
+    if: ${{ needs.web.result == 'success' }}
+    uses: ./.github/workflows/project-workspace.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      runtime_channel: ${{ inputs.runtime_channel || 'both' }}
+      include_launcher: ${{ github.event_name != 'workflow_dispatch' || inputs.include_launcher == true }}
+    secrets: inherit
+
+  doctor:
+    name: 5 · Source validation
+    needs: [workspace]
+    if: ${{ needs.workspace.result == 'success' }}
+    uses: ./.github/workflows/doctor.yml
+    with:
+      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+    secrets: inherit
+
+  publish:
+    name: 6 · Pantry Core canonical publish
+    needs: [workspace, doctor]
+    permissions:
+      contents: write
+    if: ${{ needs.doctor.result == 'success' }}
+    uses: ./.github/workflows/box.yml
+    with:
+      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+      runtime_channel: ${{ inputs.runtime_channel || 'both' }}
+      include_launcher: ${{ github.event_name != 'workflow_dispatch' || inputs.include_launcher == true }}
+    secrets: inherit
+
+  headless:
+    name: 7 · Post-publish runtime smoke
+    needs: [workspace, publish]
+    if: ${{ needs.publish.result == 'success' }}
+    uses: ./.github/workflows/headless.yml
+    with:
+      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+    secrets: inherit

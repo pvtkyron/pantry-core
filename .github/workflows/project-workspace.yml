@@ -1,0 +1,60 @@
+name: Project Workspace
+
+on:
+  workflow_call:
+    inputs:
+      capsule:
+        required: true
+        type: string
+      runtime_channel:
+        required: false
+        default: both
+        type: string
+      include_launcher:
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      delivery_capsule:
+        description: Encrypted private delivery state
+        value: ${{ jobs.prepare.outputs.delivery_capsule }}
+
+permissions:
+  contents: write
+
+jobs:
+  java:
+    name: Java · compile + D8
+    uses: ./.github/workflows/workspace-java.yml
+    with:
+      capsule: ${{ inputs.capsule }}
+      include_launcher: ${{ inputs.include_launcher }}
+    secrets: inherit
+
+  lib:
+    name: Lib · Android native
+    uses: ./.github/workflows/workspace-lib.yml
+    with:
+      capsule: ${{ inputs.capsule }}
+    secrets: inherit
+
+  exe:
+    name: EXE · signed Windows launcher
+    if: ${{ inputs.include_launcher }}
+    uses: ./.github/workflows/workspace-exe.yml
+    with:
+      capsule: ${{ inputs.capsule }}
+    secrets: inherit
+
+  prepare:
+    name: Prepare · verify handoffs + Pantry
+    needs: [java, lib, exe]
+    if: ${{ always() && needs.java.result == 'success' && needs.lib.result == 'success' && (needs.exe.result == 'success' || (inputs.include_launcher == false && needs.exe.result == 'skipped')) }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/workspace-prepare.yml
+    with:
+      capsule: ${{ inputs.capsule }}
+      runtime_channel: ${{ inputs.runtime_channel }}
+      include_launcher: ${{ inputs.include_launcher }}
+    secrets: inherit
