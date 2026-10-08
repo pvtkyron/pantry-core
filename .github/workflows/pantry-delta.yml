@@ -294,7 +294,7 @@ jobs:
           KYRON_PANTRY_PUBLISHED_SOURCE_SHA: ${{ steps.delta.outputs.published }}
           KYRON_LAUNCH_CAPSULE_MASTER_HEX: ${{ steps.master.outputs.master }}
           KYRON_RESOURCE_ROUTE_HMAC_KEY_HEX: ${{ secrets.KYRON_RESOURCE_ROUTE_HMAC_KEY_HEX }}
-          KYRON_RESOURCE_ROUTE_V2_LIB_READY: ${{ vars.KYRON_RESOURCE_ROUTE_V2_LIB_READY || '0' }}
+          KYRON_RESOURCE_ROTATION_ENABLED: ${{ vars.KYRON_RESOURCE_ROTATION_ENABLED || '0' }}
         run: |
           set -euo pipefail
           python filling/tools/prepare_snapshot.py \
