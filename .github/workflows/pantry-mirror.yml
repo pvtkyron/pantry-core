@@ -245,6 +245,8 @@ jobs:
           KYRON_PREVIOUS_CONTENT_PUBLIC_PEM: ${{ github.workspace }}/filling/security/keys/content_public.pem
           KYRON_PREVIOUS_CONTENT_PUBLIC_SHA256: 8889fca2bdc4f5294227da85b0a18e29dce10b434ef5a398a56ecb9492c187aa
           KYRON_LAUNCH_CAPSULE_MASTER_HEX: ${{ steps.master.outputs.master }}
+          KYRON_RESOURCE_ROUTE_HMAC_KEY_HEX: ${{ secrets.KYRON_RESOURCE_ROUTE_HMAC_KEY_HEX }}
+          KYRON_RESOURCE_ROUTE_V2_LIB_READY: ${{ vars.KYRON_RESOURCE_ROUTE_V2_LIB_READY || '0' }}
           KYRON_ANDROID_PLATFORM: android-34
           KYRON_ANDROID_BUILD_TOOLS: 34.0.0
         run: |
