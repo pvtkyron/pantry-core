@@ -1,0 +1,173 @@
+name: Private Source Pin
+
+on:
+  workflow_call:
+    outputs:
+      capsule:
+        description: Encrypted private source state
+        value: ${{ jobs.pin.outputs.capsule }}
+
+permissions:
+  contents: read
+
+jobs:
+  pin:
+    name: Pin private source batch
+    runs-on: ubuntu-24.04
+    outputs:
+      capsule: ${{ steps.seal.outputs.capsule }}
+    steps:
+      - name: Mask configured private repositories
+        shell: pwsh
+        env:
+          WORKSPACE_REPO: ${{ secrets.MIX_REPO }}
+          PANTRY_REPO: ${{ secrets.FILL_REPO }}
+        run: |
+          foreach($value in @($env:WORKSPACE_REPO,$env:PANTRY_REPO)){
+            if([string]::IsNullOrWhiteSpace($value)){throw 'private source configuration unavailable'}
+            Write-Host "::add-mask::$value"
+          }
+
+      - name: Open Workspace source
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          path: workspace
+          fetch-depth: 1
+          fetch-tags: false
+          lfs: false
+          persist-credentials: false
+          show-progress: false
+
+      - name: Read private project registry
+        id: registry
+        shell: pwsh
+        run: |
+          $path=Join-Path $PWD.Path 'workspace/.kyron/private-projects.json'
+          if(!(Test-Path -LiteralPath $path -PathType Leaf)){throw 'private project registry unavailable'}
+          $r=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json
+          if([int]$r.schema-ne1){throw 'private project registry schema rejected'}
+          $sdk=([string]$r.projects.sdk).Trim();$web=([string]$r.projects.web).Trim()
+          foreach($value in @($sdk,$web)){
+            if($value-notmatch'^[^/\s]+/[^/\s]+$'){throw 'private project registry entry rejected'}
+            Write-Host "::add-mask::$value"
+          }
+          "sdk_repo=$sdk" >> $env:GITHUB_OUTPUT
+          "web_repo=$web" >> $env:GITHUB_OUTPUT
+          Write-Host '[SOURCES][REGISTRY][OK]'
+
+      - name: Open Pantry source
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.FILL_REPO }}
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          lfs: false
+          persist-credentials: false
+          show-progress: false
+
+      - name: Open SDK source
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.registry.outputs.sdk_repo }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          path: sdk-source
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+
+      - name: Open web source
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.registry.outputs.web_repo }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          path: web-source
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+
+      - name: Pin and validate private source graph
+        id: state
+        shell: pwsh
+        env:
+          WORKSPACE_REPO: ${{ secrets.MIX_REPO }}
+          PANTRY_REPO: ${{ secrets.FILL_REPO }}
+          SDK_REPO: ${{ steps.registry.outputs.sdk_repo }}
+          WEB_REPO: ${{ steps.registry.outputs.web_repo }}
+        run: |
+          $ErrorActionPreference='Stop'
+          function Head([string]$Path){
+            $sha=(& git -C $Path rev-parse HEAD 2>$null).Trim().ToLowerInvariant()
+            if($LASTEXITCODE-ne0-or$sha-notmatch'^[0-9a-f]{40}$'){throw 'private source pin rejected'}
+            return $sha
+          }
+          $allowedWorkspaceActions=@{}
+          foreach($root in @('workspace','filling','sdk-source','web-source')){
+            $dir=Join-Path $PWD.Path "$root/.github/workflows"
+            if(!(Test-Path -LiteralPath $dir -PathType Container)){continue}
+            $actions=@(Get-ChildItem -LiteralPath $dir -File|Where-Object{$_.Extension -in '.yml','.yaml'})
+            if($root-eq'workspace'){
+              foreach($file in $actions){
+                $expected=[string]$allowedWorkspaceActions[$file.Name]
+                if([string]::IsNullOrWhiteSpace($expected)){throw 'private source unaudited Action rejected'}
+                $relative=".github/workflows/$($file.Name)"
+                $actual=(& git -C $root hash-object -- $relative 2>$null).Trim().ToLowerInvariant()
+                if($LASTEXITCODE-ne0-or$actual-ne$expected){throw 'private source audited Action drift rejected'}
+              }
+              if($actions.Count-ne$allowedWorkspaceActions.Count){throw 'private source audited Action set rejected'}
+              Write-Host '[SOURCES][ACTIONS][OK] pinned Workspace control action'
+              continue
+            }
+            if($actions.Count){throw 'private source Actions ownership rejected'}
+          }
+          $workspaceRef=Head 'workspace';$pantryRef=Head 'filling';$sdkRef=Head 'sdk-source';$webRef=Head 'web-source'
+          foreach($value in @($workspaceRef,$pantryRef,$sdkRef,$webRef)){Write-Host "::add-mask::$value"}
+          $state=[ordered]@{
+            schema=1
+            workspace=[ordered]@{repo=$env:WORKSPACE_REPO;ref=$workspaceRef}
+            pantry=[ordered]@{repo=$env:PANTRY_REPO;ref=$pantryRef}
+            sdk=[ordered]@{repo=$env:SDK_REPO;ref=$sdkRef}
+            web=[ordered]@{repo=$env:WEB_REPO;ref=$webRef}
+          }
+          $payload=$state|ConvertTo-Json -Compress -Depth 5
+          Write-Host "::add-mask::$payload"
+          "payload=$payload" >> $env:GITHUB_OUTPUT
+          Write-Host '[SOURCES][PIN][OK] private refs captured'
+
+      - name: Verify source contract quietly
+        shell: pwsh
+        run: |
+          $log=Join-Path $env:RUNNER_TEMP 'source-contract.log'
+          try{
+            & python3 ./filling/tools/sync_consumer_contract.py --config ./filling/SrcVersion.ini --output ./workspace/src/common/Shared/pantry_contract.hpp --check *>&1 | Set-Content -LiteralPath $log
+            if($LASTEXITCODE){throw 'contract rejected'}
+            Write-Host '[SOURCES][CONTRACT][OK]'
+          }catch{
+            Write-Host '[SOURCES][CONTRACT][FAIL]'
+            exit 1
+          }finally{
+            if(Test-Path $log){Remove-Item $log -Force -ErrorAction SilentlyContinue}
+          }
+
+      - name: Open capsule helper
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: .github/actions/private-capsule
+
+      - name: Seal private source state
+        id: seal
+        uses: ./recipe/.github/actions/private-capsule
+        with:
+          mode: seal
+          key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          payload: ${{ steps.state.outputs.payload }}

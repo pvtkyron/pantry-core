@@ -1,0 +1,82 @@
+name: Kyron Full Reconcile · 6h
+run-name: "Kyron full reconcile · both + launcher · ${{ github.run_id }}"
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kyron-full-reconcile-6h
+  cancel-in-progress: false
+
+jobs:
+  sources:
+    name: 1 · Pin private sources
+    uses: ./.github/workflows/source-pin.yml
+    secrets: inherit
+
+  sdk:
+    name: 2 · SDK project
+    needs: sources
+    if: ${{ needs.sources.result == 'success' }}
+    uses: ./.github/workflows/project-sdk.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+    secrets: inherit
+
+  web:
+    name: 3 · Web project
+    needs: [sources, sdk]
+    if: ${{ needs.sdk.result == 'success' }}
+    uses: ./.github/workflows/project-web.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+    secrets: inherit
+
+  workspace:
+    name: 4 · Workspace full build + publish
+    needs: [sources, web]
+    permissions:
+      contents: write
+    if: ${{ needs.web.result == 'success' }}
+    uses: ./.github/workflows/project-workspace.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      runtime_channel: both
+      include_launcher: true
+    secrets: inherit
+
+  doctor:
+    name: 5 · Source validation
+    needs: [workspace]
+    if: ${{ needs.workspace.result == 'success' }}
+    uses: ./.github/workflows/doctor.yml
+    with:
+      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+    secrets: inherit
+
+  publish:
+    name: 6 · Pantry Core canonical publish
+    needs: [workspace, doctor]
+    permissions:
+      contents: write
+      actions: write
+    if: ${{ needs.doctor.result == 'success' }}
+    uses: ./.github/workflows/box.yml
+    with:
+      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+      runtime_channel: both
+      include_launcher: true
+    secrets: inherit
+
+  headless:
+    name: 7 · Post-publish runtime smoke
+    needs: [workspace, publish]
+    if: ${{ needs.publish.result == 'success' }}
+    uses: ./.github/workflows/headless.yml
+    with:
+      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+    secrets: inherit

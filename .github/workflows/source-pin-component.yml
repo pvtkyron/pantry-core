@@ -1,0 +1,124 @@
+name: Component Source Pin
+
+on:
+  workflow_call:
+    outputs:
+      capsule:
+        description: Encrypted private source state for component lanes
+        value: ${{ jobs.pin.outputs.capsule }}
+
+permissions:
+  contents: read
+
+jobs:
+  pin:
+    name: Pin component source refs without heavy checkouts
+    runs-on: ubuntu-24.04
+    outputs:
+      capsule: ${{ steps.seal.outputs.capsule }}
+    steps:
+      - name: Mask configured private repositories
+        shell: pwsh
+        env:
+          WORKSPACE_REPO: ${{ secrets.MIX_REPO }}
+          PANTRY_REPO: ${{ secrets.FILL_REPO }}
+        run: |
+          foreach($value in @($env:WORKSPACE_REPO,$env:PANTRY_REPO)){
+            if([string]::IsNullOrWhiteSpace($value)){throw 'private source configuration unavailable'}
+            Write-Host "::add-mask::$value"
+          }
+
+      - name: Open Workspace registry only
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: workspace
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: |
+            .kyron/private-projects.json
+          sparse-checkout-cone-mode: false
+
+      - name: Read private project registry
+        id: registry
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=Join-Path $PWD.Path 'workspace/.kyron/private-projects.json'
+          if(!(Test-Path -LiteralPath $path -PathType Leaf)){throw 'private project registry unavailable'}
+          $r=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json
+          if([int]$r.schema-ne1){throw 'private project registry schema rejected'}
+          $sdk=([string]$r.projects.sdk).Trim();$web=([string]$r.projects.web).Trim()
+          foreach($value in @($sdk,$web)){
+            if($value-notmatch'^[^/\s]+/[^/\s]+$'){throw 'private project registry entry rejected'}
+            Write-Host "::add-mask::$value"
+          }
+          "sdk_repo=$sdk" >> $env:GITHUB_OUTPUT
+          "web_repo=$web" >> $env:GITHUB_OUTPUT
+
+      - name: Resolve private source refs without content checkout
+        id: state
+        shell: pwsh
+        env:
+          MIX_TOKEN: ${{ secrets[vars.MIX_KEY_NAME] }}
+          FILL_TOKEN: ${{ secrets[vars.FILL_KEY_NAME] }}
+          WORKSPACE_REPO: ${{ secrets.MIX_REPO }}
+          PANTRY_REPO: ${{ secrets.FILL_REPO }}
+          SDK_REPO: ${{ steps.registry.outputs.sdk_repo }}
+          WEB_REPO: ${{ steps.registry.outputs.web_repo }}
+        run: |
+          $ErrorActionPreference='Stop'
+          function Head([string]$Repo,[string]$Token){
+            $Repo=($Repo+'').Trim();$Token=($Token+'').Trim()
+            $Token=-join @($Token.ToCharArray()|Where-Object{[int]$_ -ge 33 -and [int]$_ -le 126})
+            if([string]::IsNullOrWhiteSpace($Repo)-or[string]::IsNullOrWhiteSpace($Token)){throw 'private source ref input missing'}
+            $headers=@{
+              Authorization="Bearer $Token"
+              Accept='application/vnd.github+json'
+              'X-GitHub-Api-Version'='2022-11-28'
+              'User-Agent'='kyron-component-source-pin'
+            }
+            $row=Invoke-RestMethod -Method Get -Uri ("https://api.github.com/repos/{0}/commits/main" -f $Repo) -Headers $headers -TimeoutSec 30
+            $sha=([string]$row.sha).Trim().ToLowerInvariant()
+            if($sha-notmatch'^[0-9a-f]{40}$'){throw 'private source ref rejected'}
+            return $sha
+          }
+          $workspaceRef=(& git -C workspace rev-parse HEAD).Trim().ToLowerInvariant()
+          if($workspaceRef-notmatch'^[0-9a-f]{40}$'){throw 'workspace source ref rejected'}
+          $pantryRef=Head $env:PANTRY_REPO $env:FILL_TOKEN
+          $sdkRef=Head $env:SDK_REPO $env:MIX_TOKEN
+          $webRef=Head $env:WEB_REPO $env:MIX_TOKEN
+          foreach($value in @($workspaceRef,$pantryRef,$sdkRef,$webRef)){Write-Host "::add-mask::$value"}
+          $state=[ordered]@{
+            schema=1
+            workspace=[ordered]@{repo=$env:WORKSPACE_REPO;ref=$workspaceRef}
+            pantry=[ordered]@{repo=$env:PANTRY_REPO;ref=$pantryRef}
+            sdk=[ordered]@{repo=$env:SDK_REPO;ref=$sdkRef}
+            web=[ordered]@{repo=$env:WEB_REPO;ref=$webRef}
+          }
+          $payload=$state|ConvertTo-Json -Compress -Depth 5
+          Write-Host "::add-mask::$payload"
+          "payload=$payload" >> $env:GITHUB_OUTPUT
+          Write-Host '[COMPONENT-SOURCES][PIN][OK] refs captured without heavy checkouts'
+
+      - name: Open capsule helper only
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: .github/actions/private-capsule
+
+      - name: Seal private source state
+        id: seal
+        uses: ./recipe/.github/actions/private-capsule
+        with:
+          mode: seal
+          key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          payload: ${{ steps.state.outputs.payload }}

@@ -1,0 +1,257 @@
+name: Workspace Windows executable lane
+
+on:
+  workflow_call:
+    inputs:
+      capsule:
+        required: true
+        type: string
+      direct_publish:
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+# kyron-laptop intentionally uses Windows PowerShell 5.1; keep inline script APIs PS5-compatible.
+# Exact source pins use run/attempt-isolated sparse staging under RUNNER_TEMP; canonical working trees are never consumed.
+jobs:
+  exe:
+    name: Compile signed Windows launcher
+    runs-on: [self-hosted, Windows, X64, kyron-laptop]
+    timeout-minutes: 240
+    env:
+      KYRON_SERIAL_BUILD: '1'
+      KYRON_CANONICAL_SDK_ROOT: 'D:\kyron-sdk'
+      KYRON_SDK_ROOT: 'D:\kyron-sdk'
+      KYRON_BUILD_JOBS: '2'
+      KYRON_MSBUILD_TIMEOUT_SECONDS: '1200'
+      KYRON_SLICE_TIMEOUT_SECONDS: '3600'
+      KYRON_HEARTBEAT_SECONDS: '30'
+      KYRON_DISCORD_CLIENT_ID: ${{ secrets.KYRON_DISCORD_CLIENT_ID || vars.KYRON_DISCORD_CLIENT_ID || '1548955594143178762' }}
+      ANDROID_HOME: ''
+      ANDROID_SDK_ROOT: ''
+      ANDROID_NDK_HOME: ''
+      ANDROID_NDK_ROOT: ''
+      NDK_ROOT: ''
+      JAVA_HOME: ''
+      KYRON_GIT: 'D:\kyron-sdk\Git\2.56.0.2\cmd\git.exe'
+      KYRON_PYTHON: 'D:\kyron-sdk\Python\current\python.exe'
+      KYRON_DOTNET: 'D:\kyron-sdk\DotNet\current\dotnet.exe'
+      # Tool bundles stay local on kyron-laptop; StageLauncherForPantry verifies every file against Workspace SHA pins before copying.
+      KYRON_XRAY_TOOL_ROOT: 'D:\pantry\client\tools\xray'
+      KYRON_ANDROID_PLATFORM_TOOLS_ROOT: 'D:\pantry\client\tools\android'
+      KYRON_COMMANDER_TOOL_ROOT: 'D:\pantry\client\tools\commanders'
+    steps:
+      - name: Bind isolated Workspace data root + canonical tools
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $utf8=[Text.UTF8Encoding]::new($false)
+          $root=Join-Path $env:RUNNER_TEMP ("kyron-state-exe-{0}-{1}" -f $env:GITHUB_RUN_ID,$env:GITHUB_RUN_ATTEMPT)
+          [IO.File]::AppendAllText($env:GITHUB_ENV,("KYRON_WORKSPACE_DATA_ROOT=$root"+[Environment]::NewLine),$utf8)
+          $pinned=Join-Path $env:RUNNER_TEMP ("kyron-exe-pinned-{0}-{1}" -f $env:GITHUB_RUN_ID,$env:GITHUB_RUN_ATTEMPT)
+          New-Item -ItemType Directory -Force -Path $pinned|Out-Null
+          [IO.File]::AppendAllText($env:GITHUB_ENV,("KYRON_EXE_PINNED_ROOT=$pinned"+[Environment]::NewLine),$utf8)
+          foreach($tool in @($env:KYRON_GIT,$env:KYRON_PYTHON,$env:KYRON_DOTNET)){if(!(Test-Path -LiteralPath $tool -PathType Leaf)){throw "canonical local tool missing: $tool"}}
+          foreach($dir in @((Split-Path $env:KYRON_GIT -Parent),(Split-Path $env:KYRON_PYTHON -Parent),(Split-Path $env:KYRON_DOTNET -Parent))){[IO.File]::AppendAllText($env:GITHUB_PATH,($dir+[Environment]::NewLine),$utf8)}
+          Write-Host ("[PROJECT/WORKSPACE/EXE/STATE] root="+$root)
+          Write-Host '[PROJECT/WORKSPACE/EXE/TOOLS][OK] canonical local Git/Python/.NET bound'
+
+      - name: Open lane recipe without Marketplace resolver
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $recipe=Join-Path $env:RUNNER_TEMP ("kyron-exe-recipe-{0}-{1}" -f $env:GITHUB_RUN_ID,$env:GITHUB_RUN_ATTEMPT)
+          if(Test-Path -LiteralPath $recipe){Remove-Item -LiteralPath $recipe -Recurse -Force}
+          New-Item -ItemType Directory -Force -Path $recipe|Out-Null
+          $base="https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA"
+          $headers=@{'User-Agent'='kyron-self-hosted-exe'}
+          foreach($item in @(@('.github/actions/private-capsule/capsule.ps1','capsule.ps1'),@('.github/workflows/workspace-handoff.ps1','workspace-handoff.ps1'))){
+            $dst=Join-Path $recipe $item[1]
+            Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri ($base+'/'+$item[0]) -OutFile $dst -TimeoutSec 60
+            if(!(Test-Path -LiteralPath $dst -PathType Leaf)-or(Get-Item -LiteralPath $dst).Length-lt256){throw "lane recipe download rejected: $($item[0])"}
+          }
+          [IO.File]::AppendAllText($env:GITHUB_ENV,("KYRON_EXE_RECIPE=$recipe"+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
+          Write-Host '[PROJECT/WORKSPACE/EXE/RECIPE][OK] raw GitHub transport; action resolver bypassed'
+
+      - name: Open private source state
+        id: state
+        shell: powershell
+        env:
+          CAPSULE_MODE: open
+          CAPSULE_KEY: ${{ secrets[vars.MIX_KEY_NAME] }}
+          CAPSULE_VALUE: ${{ inputs.capsule }}
+          CAPSULE_PROJECT: workspace
+        run: |
+          $ErrorActionPreference='Stop'
+          & (Join-Path $env:KYRON_EXE_RECIPE 'capsule.ps1')
+          if(!$?){throw 'Private source capsule open failed'}
+
+      - name: Open pinned private sources from canonical local object stores
+        shell: powershell
+        env:
+          WORKSPACE_REF: ${{ steps.state.outputs.workspace_ref }}
+          PANTRY_REF: ${{ steps.state.outputs.pantry_ref }}
+        run: |
+          Set-Location -LiteralPath $env:KYRON_EXE_PINNED_ROOT
+          $ErrorActionPreference='Stop'
+          function Open-LocalPinned([string]$Canonical,[string]$Ref,[string]$Path,[string[]]$Sparse){
+            if($Ref-notmatch'^[0-9a-f]{40}$'){throw 'private source pin rejected'}
+            if(!(Test-Path -LiteralPath (Join-Path $Canonical '.git'))){throw "canonical local repository unavailable: $Canonical"}
+            & $env:KYRON_GIT -C $Canonical cat-file -e ($Ref+'^{commit}') 2>$null
+            if($LASTEXITCODE){
+              & $env:KYRON_GIT -C $Canonical fetch -q --filter=blob:none --no-tags origin $Ref
+              if($LASTEXITCODE){throw "pinned commit hydrate failed: $Canonical $Ref"}
+              & $env:KYRON_GIT -C $Canonical cat-file -e ($Ref+'^{commit}')
+              if($LASTEXITCODE){throw "pinned commit unavailable after hydrate: $Canonical $Ref"}
+              Write-Host ("[PROJECT/WORKSPACE/EXE/PIN-HYDRATE][OK] root="+$Canonical+" ref="+$Ref.Substring(0,12)+" blobs=lazy")
+            }
+            $origin=(& $env:KYRON_GIT -C $Canonical remote get-url origin).Trim()
+            if($LASTEXITCODE-or[string]::IsNullOrWhiteSpace($origin)){throw "canonical promisor origin unavailable: $Canonical"}
+            if(Test-Path -LiteralPath $Path){Remove-Item -LiteralPath $Path -Recurse -Force}
+            & $env:KYRON_GIT init -q $Path
+            if($LASTEXITCODE){throw "isolated local repository init rejected: $Canonical"}
+            & $env:KYRON_GIT -C $Path remote add origin $origin
+            & $env:KYRON_GIT -C $Path config remote.origin.promisor true
+            & $env:KYRON_GIT -C $Path config remote.origin.partialclonefilter blob:none
+            & $env:KYRON_GIT -C $Path config core.sparseCheckout true
+            & $env:KYRON_GIT -C $Path config core.sparseCheckoutCone false
+            if($LASTEXITCODE){throw "isolated sparse/promisor configuration rejected: $Canonical"}
+            $objects=((Resolve-Path -LiteralPath (Join-Path $Canonical '.git\objects')).Path -replace '\\','/')
+            $alternates=Join-Path $Path '.git\objects\info\alternates'
+            [IO.File]::WriteAllText($alternates,($objects+[char]10),[Text.UTF8Encoding]::new($false))
+            $spec=Join-Path $Path '.git\info\sparse-checkout'
+            [IO.File]::WriteAllLines($spec,@($Sparse),[Text.UTF8Encoding]::new($false))
+            & $env:KYRON_GIT -C $Path fetch --quiet --no-tags --filter=blob:none origin $Ref
+            if($LASTEXITCODE){throw "pinned sparse hydrate fetch rejected: $Canonical $Ref"}
+            & $env:KYRON_GIT -C $Path checkout -q --detach FETCH_HEAD
+            if($LASTEXITCODE){throw "pinned sparse checkout rejected: $Ref"}
+            $actual=(& $env:KYRON_GIT -C $Path rev-parse HEAD).Trim().ToLowerInvariant()
+            if($actual-ne$Ref.ToLowerInvariant()){throw 'private source pin mismatch'}
+            Write-Host ("[PROJECT/WORKSPACE/EXE/SPARSE][OK] root="+$Canonical+" paths="+$Sparse.Count+" ref="+$Ref.Substring(0,12))
+          }
+          $workspaceSparse=@(
+            '/.gitattributes','/.gitignore','/.vsconfig','/Directory.Build.props','/Kyron.sln','/toolchains.lock.json',
+            '/scripts/','/security/signing/','/src/common/Shared/','/src/windows/Bootstrap/','/src/windows/Directory.Build.props','/src/windows/Launcher/','/Tools/',
+            '/src/android/KyronVM/tools/validate-signing-contract.ps1','/src/android/VeraInternal/jni/Application.mk','/src/android/VeraInternal/jni/include/pantry_contract.hpp','/src/android/VeraInternal/jni/Protection/PantryLocalTrust.generated.hpp',
+            '/PantryPublisher/Initialize-LocalPantrySigner.ps1','/PantryPublisher/LocalPantrySignerAcl.ps1','/PantryPublisher/Preflight-PantryRelease.ps1','/PantryPublisher/Run-PantryRelease.ps1','/PantryPublisher/Prepare-PantryCore.ps1','/PantryPublisher/Publish-PantryCore.ps1','/PantryPublisher/Update-PantryArtifacts.ps1',
+            '/PantryPublisher/Stage-PantryInputs.ps1','/PantryPublisher/Sync-PantryContract.ps1','/PantryPublisher/StageLauncherForPantry.ps1',
+            '/PantryPublisher/Assert-FrozenBootstrap.ps1','/PantryPublisher/Compose-PantryDeliveryProvenance.ps1'
+          )
+          $pantrySparse=@(
+            '/.gitattributes','/.gitignore','/SrcVersion.ini','/tools/sync_consumer_contract.py','/tools/sync_pantry_contract.py',
+            '/client/Bootstrap.exe','/client/Bootstrap.release.json','/client/launch-plane-only.marker','/client/Launcher.build.json',
+            '/client/runtime/*/WinDivert.dll','/client/runtime/*/WinDivert64.sys',
+            '/release/bootstrap-delivery-v1.json','/release/runtime-lane-v1.json','/release/primary-runtime-v10.marker',
+            '/release/delivery-provenance-v1.json','/release/launcher-lane-v1.json','/release/launcher-v10.marker',
+            '/lib/libkyron.so','/lib/libkyron64.so','/lib/libkyroni.so','/lib/libkyroni64.so',
+            '/lib/libkyron-*.so','/lib/libkyron64-*.so','/lib/libkyroni-*.so','/lib/libkyroni64-*.so'
+          )
+          Open-LocalPinned 'D:\kyron' $env:WORKSPACE_REF (Join-Path $PWD.Path 'source') $workspaceSparse
+          Open-LocalPinned 'D:\pantry' $env:PANTRY_REF (Join-Path $PWD.Path 'filling') $pantrySparse
+          Write-Host '[PROJECT/WORKSPACE/EXE/SOURCES][OK] exact pins opened sparse-first from canonical promisor object stores'
+
+      - name: Bind release source branches
+        shell: powershell
+        run: |
+          Set-Location -LiteralPath $env:KYRON_EXE_PINNED_ROOT
+          $ErrorActionPreference='Stop'
+          foreach($repo in @('source','filling')){& $env:KYRON_GIT -C $repo checkout -q -B main HEAD;if($LASTEXITCODE){throw "release main binding rejected: $repo"}}
+
+      - name: Materialize canonical Pantry signer
+        shell: powershell
+        env:
+          CREAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+          CREAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+          JAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+          JAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
+        run: |
+          Set-Location -LiteralPath $env:KYRON_EXE_PINNED_ROOT
+          $ErrorActionPreference='Stop'
+          foreach($n in @('CREAM_A','CREAM_B','JAM_A','JAM_B')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical local Pantry signer input missing: $n"}}
+          . .\source\scripts\workspace-common.ps1
+          $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1';New-Item -ItemType Directory -Force -Path $root|Out-Null;$utf8=[Text.UTF8Encoding]::new($false)
+          foreach($x in @(@('bootstrap_root_private.pem','CREAM_A'),@('bootstrap_root_public.pem','CREAM_B'),@('content_private.pem','JAM_A'),@('content_public.pem','JAM_B'))){[IO.File]::WriteAllText((Join-Path $root $x[0]),([Environment]::GetEnvironmentVariable($x[1])).Trim()+"`n",$utf8)}
+          & .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -Workspace (Join-Path $PWD.Path 'source') -ExpectedProfile local-machine-v1 -Ephemeral -RequireExistingIdentity|Out-Null
+          if(!$?){throw 'Canonical local Pantry signer validation failed'}
+
+      - name: Validate canonical code signer from laptop store
+        shell: powershell
+        run: |
+          Set-Location -LiteralPath $env:KYRON_EXE_PINNED_ROOT
+          $ErrorActionPreference='Stop'
+          if($env:USERNAME -ine 'kyron'){throw ('canonical signer requires kyron runner user; current='+$env:USERDOMAIN+'\'+$env:USERNAME)}
+          & .\source\src\android\KyronVM\tools\validate-signing-contract.ps1
+          if(!$?){throw 'Canonical certificate-store signer validation failed'}
+          $meta=Get-Content -LiteralPath '.\source\security\signing\canonical-signer.json' -Raw|ConvertFrom-Json
+          Write-Host ('[PROJECT/WORKSPACE/EXE/CODESIGN][OK] source=CurrentUser/My cert='+([string]$meta.certificate_sha256).ToLowerInvariant())
+
+      - name: Validate canonical local build SDK
+        shell: powershell
+        run: |
+          Set-Location -LiteralPath $env:KYRON_EXE_PINNED_ROOT
+          $ErrorActionPreference='Stop'
+          $gitVersion=(& $env:KYRON_GIT --version|Select-Object -Last 1).Trim()
+          $pythonVersion=(& $env:KYRON_PYTHON --version 2>&1|Select-Object -Last 1).ToString().Trim()
+          $dotnetVersion=(& $env:KYRON_DOTNET --version|Select-Object -Last 1).Trim()
+          if($dotnetVersion-notmatch'^8\.'){throw "canonical .NET 8 SDK rejected: $dotnetVersion"}
+          Write-Host "[PROJECT/WORKSPACE/EXE/SDK][OK] $gitVersion; $pythonVersion; dotnet=$dotnetVersion"
+
+      - name: Bind managed SDK
+        shell: powershell
+        run: |
+          Set-Location -LiteralPath $env:KYRON_EXE_PINNED_ROOT
+          $ErrorActionPreference='Stop';. .\source\scripts\workspace-common.ps1;$sdk=Resolve-WorkspaceSdkRoot;$dotnet=(Get-Command dotnet.exe -ErrorAction Stop).Source;$target=Join-Path $sdk 'dotnet\current';New-Item -ItemType Directory -Force (Split-Path $target -Parent)|Out-Null
+          if(!(Test-Path -LiteralPath $target -PathType Container)){New-Item -ItemType Junction -Path $target -Target (Split-Path $dotnet -Parent)|Out-Null};if(!(Test-Path -LiteralPath (Join-Path $target 'dotnet.exe') -PathType Leaf)){throw 'Canonical managed .NET SDK binding is unavailable'}
+
+      - name: Ensure canonical Workspace toolchain
+        shell: powershell
+        run: |
+          Set-Location -LiteralPath $env:KYRON_EXE_PINNED_ROOT
+          $ErrorActionPreference='Stop';& .\source\scripts\ensure-workspace-toolchain.ps1;if(!$?){throw 'Canonical Workspace toolchain bootstrap failed'}
+
+      - name: Compile signed launcher lane and publish directly when requested
+        shell: powershell
+        env:
+          KYRON_PANTRY_SIGNER_PROFILE: local-machine-v1
+          KYRON_EXE_DIRECT_PUBLISH: ${{ inputs.direct_publish }}
+        run: |
+          Set-Location -LiteralPath $env:KYRON_EXE_PINNED_ROOT
+          $ErrorActionPreference='Stop'
+          & .\source\Tools\ValidatePantryContract.ps1;if(!$?){throw 'Canonical Workspace/Pantry contract validation failed'}
+          & .\source\PantryPublisher\Assert-FrozenBootstrap.ps1 -PantryPath (Join-Path $PWD.Path 'filling');if(!$?){throw 'Frozen Bootstrap verification failed'}
+          & .\source\Tools\BuildWindowsSlice.ps1 -Mode launcher;if(!$?){throw 'Launcher release slice failed'}
+          Write-Host '[PROJECT/WORKSPACE/EXE][OK] signed launcher slice'
+          if($env:KYRON_EXE_DIRECT_PUBLISH-eq'true'){
+            Set-Location -LiteralPath $env:KYRON_EXE_PINNED_ROOT
+            $ErrorActionPreference='Stop'
+            & .\source\PantryPublisher\Update-PantryArtifacts.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -ArtifactPlan launcher -IncludeLauncher -SkipBuild -WorkspaceStatePrevalidated -PantryStatePrevalidated
+            if(!$?){throw 'Launcher direct Pantry promotion failed'}
+            Write-Host '[PROJECT/WORKSPACE/EXE/PUBLISH][OK] launcher payload staged and pushed without rebuild'
+          }
+
+      - name: Seal executable lane
+        if: ${{ inputs.direct_publish == false }}
+        id: shard
+        shell: powershell
+        env:
+          KYRON_HANDOFF_SECRET: ${{ secrets[vars.MIX_KEY_NAME] }}
+        run: |
+          Set-Location -LiteralPath $env:KYRON_EXE_PINNED_ROOT
+          $ErrorActionPreference='Stop'
+          $workspaceSha=(& $env:KYRON_GIT -C source rev-parse HEAD).Trim().ToLowerInvariant();$pantrySha=(& $env:KYRON_GIT -C filling rev-parse HEAD).Trim().ToLowerInvariant();$out=Join-Path $env:RUNNER_TEMP 'workspace-exe-handoff';$root=Join-Path $PWD.Path 'source'
+          if(Test-Path -LiteralPath $out){Remove-Item -LiteralPath $out -Recurse -Force}
+          $bridge=Join-Path $root 'src\windows\Launcher\lib\KyronLauncherRuntime\Release\net8.0-windows10.0.19041.0\native\GameLoopNativeBridge.exe'
+          if(!(Test-Path -LiteralPath $bridge -PathType Leaf)){throw 'GameLoop native bridge is missing from the managed runtime handoff'}
+          $signature=Get-AuthenticodeSignature -LiteralPath $bridge
+          if($signature.Status-ne[Management.Automation.SignatureStatus]::Valid-or!$signature.SignerCertificate){throw "GameLoop native bridge signature rejected: $($signature.Status)"}
+          $meta=Get-Content -LiteralPath (Join-Path $root 'security\signing\canonical-signer.json') -Raw|ConvertFrom-Json
+          $sha=[Security.Cryptography.SHA256]::Create();try{$bridgeSigner=(([BitConverter]::ToString($sha.ComputeHash($signature.SignerCertificate.RawData))) -replace '-','').ToLowerInvariant()}finally{$sha.Dispose()}
+          if($bridgeSigner-ne([string]$meta.certificate_sha256).ToLowerInvariant()){throw 'GameLoop native bridge signer fingerprint mismatch'}
+          Write-Host '[PROJECT/WORKSPACE/EXE][GAMELOOP/OK] packaged bridge signature is canonical'
+          $paths=@('src\windows\Launcher\lib\x64\Release\local-machine-v1','src\windows\Launcher\lib\CoreRuntime\x64\Release','src\windows\Launcher\lib\TunnelRuntime\x64\Release','src\windows\Launcher\lib\KyronLauncherRuntime\Release\net8.0-windows10.0.19041.0');foreach($p in @('src\windows\Launcher\obj\Tools','src\windows\Launcher\obj\Launcher\x64\Release\llvm\tools')){if(Test-Path -LiteralPath (Join-Path $root $p)){$paths+=$p}}
+          if($paths.Count-lt5){throw 'Launcher staging output is incomplete in executable lane'}
+          & (Join-Path $env:KYRON_EXE_RECIPE 'workspace-handoff.ps1') -Mode pack -Lane exe -PantryRoot (Join-Path $PWD.Path 'filling') -WorkspaceSha $workspaceSha -PantrySha $pantrySha -Secret $env:KYRON_HANDOFF_SECRET -SourceRoot $root -Paths $paths -OutputRoot $out -Python $env:KYRON_PYTHON
+          if(!$?){throw 'Executable lane handoff sealing failed'}

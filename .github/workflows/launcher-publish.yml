@@ -1,0 +1,34 @@
+name: Component · Launcher
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/launcher-publish.yml'
+      - '.github/workflows/workspace-exe.yml'
+  workflow_dispatch:
+  repository_dispatch:
+    types: [component-launcher]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: component-launcher-sparse-v1
+  cancel-in-progress: false
+
+jobs:
+  sources:
+    name: Pin source batch
+    uses: ./.github/workflows/source-pin-component.yml
+    secrets: inherit
+
+  launcher:
+    name: Launcher · signed Windows executable only
+    needs: sources
+    if: ${{ needs.sources.result == 'success' }}
+    uses: ./.github/workflows/workspace-exe.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      direct_publish: true
+    secrets: inherit

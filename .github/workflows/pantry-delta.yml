@@ -1,0 +1,352 @@
+name: Pantry delta to Pantry Core
+run-name: >-
+  Pantry delta ${{ github.event.client_payload.pantry_sha || inputs.pantry_sha || 'main' }}
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pantry-delta.yml'
+  workflow_dispatch:
+    inputs:
+      pantry_sha:
+        description: Exact Pantry commit to publish; blank means Pantry main
+        required: false
+        default: ''
+        type: string
+  repository_dispatch:
+    types: [pantry-delta]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pantry-delta-v2
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish only changed Pantry content
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Open Pantry tracker with canonical Git credential
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pvtkyron/pantry
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: ${{ github.event.client_payload.pantry_sha || inputs.pantry_sha || 'main' }}
+          path: filling
+          fetch-depth: 100
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+          sparse-checkout: |
+            SrcVersion.ini
+            release/pantry-core-route-state.ini
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve and open Pantry delta
+        id: delta
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          target="$(git -C filling rev-parse HEAD | tr '[:upper:]' '[:lower:]')"
+          [[ "$target" =~ ^[0-9a-f]{40}$ ]]
+
+          published="$(
+            gh api "repos/${GITHUB_REPOSITORY}/commits?sha=main&per_page=100" \
+              --jq '[.[] | .commit.message | capture("Pantry-Source: (?<sha>[0-9a-f]{40})")? | select(.sha != null) | .sha][0] // ""'
+          )"
+          [[ "$published" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No published Pantry-Source baseline found on Pantry Core main"; exit 1; }
+          if [[ "$published" == "$target" ]]; then
+            echo "needs_publish=false" >> "$GITHUB_OUTPUT"
+            echo "target=$target" >> "$GITHUB_OUTPUT"
+            echo "[PANTRY-DELTA][NOOP] published=$published target=$target"
+            exit 0
+          fi
+          if ! git -C filling cat-file -e "$published^{commit}" 2>/dev/null; then
+            git -C filling fetch --quiet --no-tags --depth=1 origin "$published"
+          fi
+          if ! git -C filling merge-base --is-ancestor "$published" "$target"; then
+            git -C filling fetch --quiet --no-tags --deepen=200 origin main || true
+          fi
+          git -C filling merge-base --is-ancestor "$published" "$target" || { echo "::error::Pantry target is not a descendant of published source"; exit 1; }
+
+          state_ready=false
+          if git -C filling cat-file -e "$target:release/pantry-core-route-state.ini" 2>/dev/null; then
+            state_pin="$(git -C filling show "$target:release/pantry-core-route-state.ini" | sed -n '1s/^; Pantry-Source: //p' | tr -d '\r')"
+            if [[ "$state_pin" == "$published" ]]; then state_ready=true; fi
+          fi
+
+          git -C filling diff --name-status -M "$published" "$target" -- > "$RUNNER_TEMP/pantry-name-status.tsv"
+          : > "$RUNNER_TEMP/pantry-changed.list"
+          unsafe=false
+          needs_lua=false
+          while IFS=$'\t' read -r status first second; do
+            [[ -n "$first" ]] || continue
+            file="$first"; kind="$status"
+            if [[ "$status" == R* ]]; then file="$second"; kind="renamed"; fi
+            if [[ "$status" == D* ]]; then kind="removed"; fi
+            case "$file" in
+              release/pantry-core-route-state.ini|release/*|tools/*|tests/*|security/*|README.md|AI_README.md|00_AI_READ_FIRST.md|memory.md|.gitattributes|.gitignore)
+                continue
+                ;;
+              SrcVersion.ini)
+                unsafe=true
+                echo "[PANTRY-DELTA][FULL-REQUIRED] contract changed: $file"
+                continue
+                ;;
+            esac
+            if [[ "$file" =~ ^lib/libkyron(64|i|i64)?-[0-9a-f]{24}\.so$ ]]; then continue; fi
+            if [[ ! "$file" =~ ^(auth/|client/|lib/|lua/|assest/|Font/|img/|nativebridge/|dist/|vm/) ]]; then continue; fi
+            if [[ "$kind" == "removed" || "$kind" == "renamed" ]]; then
+              unsafe=true
+              echo "[PANTRY-DELTA][FULL-REQUIRED] status=$kind path=$file"
+              continue
+            fi
+            printf '%s\n' "$file" >> "$RUNNER_TEMP/pantry-changed.list"
+            if [[ "$file" == auth/subscription.json || "$file" == lua/* ]]; then needs_lua=true; fi
+          done < "$RUNNER_TEMP/pantry-name-status.tsv"
+
+          sort -u -o "$RUNNER_TEMP/pantry-changed.list" "$RUNNER_TEMP/pantry-changed.list"
+          changed_count="$(grep -c . "$RUNNER_TEMP/pantry-changed.list" || true)"
+          if [[ "$unsafe" == true ]]; then
+            echo "::error::Delta publication rejected; full six-hour reconcile is required for delete/rename/contract changes"
+            exit 1
+          fi
+          if [[ "$changed_count" -eq 0 ]]; then
+            echo "needs_publish=false" >> "$GITHUB_OUTPUT"
+            echo "target=$target" >> "$GITHUB_OUTPUT"
+            echo "[PANTRY-DELTA][NOOP] only control/source-tool changes from=$published to=$target"
+            exit 0
+          fi
+
+          sparse="$RUNNER_TEMP/pantry-sparse.list"
+          cat > "$sparse" <<'EOF'
+          /SrcVersion.ini
+          /release/pantry-core-route-state.ini
+          /tools/
+          /tests/test_consumer_contract.py
+          /tests/test_signer_cutover.py
+          /tests/test_lua_precompile.py
+          /tests/test_delta_publication_runtime.py
+          /security/keys/content_public.pem
+          /security/keys/content_public.previous-local-machine-v1.pem
+          /client/Launcher.exe
+          /client/Launcher.build.json
+          /client/KyronCoreService.exe
+          /dist/InputHost.dex
+          /lib/libkyron.so
+          /lib/libkyron64.so
+          /lib/libkyroni.so
+          /lib/libkyroni64.so
+          EOF
+          if [[ "$state_ready" != true ]]; then
+            cat >> "$sparse" <<'EOF'
+          /auth/
+          /client/
+          /lib/
+          /lua/
+          /assest/
+          /Font/
+          /img/
+          /nativebridge/
+          /dist/
+          /vm/
+          EOF
+          else
+            while IFS= read -r path; do printf '/%s\n' "$path" >> "$sparse"; done < "$RUNNER_TEMP/pantry-changed.list"
+            if [[ "$needs_lua" == true ]]; then printf '/lua/\n/auth/subscription.json\n' >> "$sparse"; fi
+          fi
+          sort -u -o "$sparse" "$sparse"
+          cp "$sparse" filling/.git/info/sparse-checkout
+          git -C filling read-tree -mu HEAD
+
+          echo "needs_publish=true" >> "$GITHUB_OUTPUT"
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "published=$published" >> "$GITHUB_OUTPUT"
+          echo "state_ready=$state_ready" >> "$GITHUB_OUTPUT"
+          core_index="$(awk '
+            /^\[runtime\.contract\]$/ {in_runtime=1; next}
+            /^\[/ {in_runtime=0}
+            in_runtime && /^index_record=/ {sub(/^index_record=/,""); print; exit}
+          ' filling/SrcVersion.ini | tr -d '\r')"
+          [[ "$core_index" =~ ^kyron/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{28}\.bin$ ]] || { echo "::error::Invalid Pantry Core index route: $core_index"; exit 1; }
+
+          echo "needs_lua=$needs_lua" >> "$GITHUB_OUTPUT"
+          echo "core_index=$core_index" >> "$GITHUB_OUTPUT"
+          echo "[PANTRY-DELTA][READY] from=$published to=$target changed=$changed_count state=$state_ready lua=$needs_lua patterns=$(wc -l < "$sparse") core_index=$core_index"
+
+      - name: Open Pantry Core publish target
+        if: ${{ steps.delta.outputs.needs_publish == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf shelf
+          git init shelf
+          git -C shelf remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          gh auth setup-git
+          git -C shelf fetch --filter=blob:none --no-tags --depth=100 origin main
+          git -C shelf sparse-checkout init --no-cone
+          printf '/%s\n' "${{ steps.delta.outputs.core_index }}" > shelf/.git/info/sparse-checkout
+          git -C shelf checkout -B main FETCH_HEAD
+          git -C shelf config gc.auto 0
+          echo "[PANTRY-DELTA][CORE] hydrated=index-only path=${{ steps.delta.outputs.core_index }}"
+
+      - name: Open Bootstrap transport contract
+        if: ${{ steps.delta.outputs.needs_publish == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pvtkyron/Workspace
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: source
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: |
+            PantryPublisher/prepare_pantry_core_legacy.py
+            src/windows/Bootstrap/jni/security/trust/BootstrapTransportKey.hpp
+            src/windows/Bootstrap/jni/build/BuildSeed.hpp
+          sparse-checkout-cone-mode: false
+
+      - name: Install Python 3.12
+        if: ${{ steps.delta.outputs.needs_publish == 'true' }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: filling/tools/requirements-launch.txt
+
+      - name: Install verified Pantry Python dependencies
+        if: ${{ steps.delta.outputs.needs_publish == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          requirements="filling/tools/requirements-launch.txt"
+          python -m pip install --disable-pip-version-check --no-input -r "$requirements"
+          deps_sha="$(sha256sum "$requirements" | awk '{print $1}')"
+          echo "KYRON_PANTRY_DEPENDENCIES_VERIFIED_SHA256=$deps_sha" >> "$GITHUB_ENV"
+          python -c 'import cryptography,lz4'
+
+      - name: Install Lua 5.3 only when Lua/auth changed
+        if: ${{ steps.delta.outputs.needs_publish == 'true' && steps.delta.outputs.needs_lua == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends lua5.3
+          luac5.3 -v 2>&1 | grep -F 'Lua 5.3.6'
+
+      - name: Materialize signer public keys
+        if: ${{ steps.delta.outputs.needs_publish == 'true' }}
+        id: signer
+        shell: bash
+        env:
+          ROOT_PUBLIC: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+          CONTENT_PUBLIC: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          root=Path(os.environ["RUNNER_TEMP"])/"pantry-bootstrap-public.pem"
+          content=Path(os.environ["RUNNER_TEMP"])/"pantry-content-public.pem"
+          for path,name in ((root,"ROOT_PUBLIC"),(content,"CONTENT_PUBLIC")):
+              value=os.environ.get(name,"").strip()
+              if "BEGIN PUBLIC KEY" not in value:
+                  raise SystemExit(f"{name} is missing or invalid")
+              path.write_text(value+"\n",encoding="utf-8",newline="\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a",encoding="utf-8") as out:
+              print(f"root_public={root}",file=out)
+              print(f"content_public={content}",file=out)
+          PY
+
+      - name: Reconstruct Bootstrap transport master
+        if: ${{ steps.delta.outputs.needs_publish == 'true' }}
+        id: master
+        shell: bash
+        run: |
+          set -euo pipefail
+          master="$(python source/PantryPublisher/prepare_pantry_core_legacy.py --workspace source --print-transport-master | tail -n 1 | tr -d '\r\n')"
+          [[ "$master" =~ ^[0-9a-f]{64}$ ]]
+          echo "::add-mask::$master"
+          echo "master=$master" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare and publish only Pantry delta
+        if: ${{ steps.delta.outputs.needs_publish == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KYRON_PANTRY_SIGNER_PROFILE: local-machine-v1
+          KYRON_BOOTSTRAP_ROOT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+          KYRON_CONTENT_PRIVATE_PEM: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+          KYRON_BOOTSTRAP_ROOT_PUBLIC_PEM: ${{ steps.signer.outputs.root_public }}
+          KYRON_CONTENT_PUBLIC_PEM: ${{ steps.signer.outputs.content_public }}
+          KYRON_PREVIOUS_CONTENT_PUBLIC_PEM: ${{ github.workspace }}/filling/security/keys/content_public.pem
+          KYRON_PREVIOUS_CONTENT_PUBLIC_SHA256: 8889fca2bdc4f5294227da85b0a18e29dce10b434ef5a398a56ecb9492c187aa
+          KYRON_PANTRY_PUBLISHED_SOURCE_SHA: ${{ steps.delta.outputs.published }}
+          KYRON_LAUNCH_CAPSULE_MASTER_HEX: ${{ steps.master.outputs.master }}
+        run: |
+          set -euo pipefail
+          python filling/tools/prepare_snapshot.py \
+            --source filling \
+            --cdn shelf \
+            --source-sha "${{ steps.delta.outputs.target }}" \
+            --run-id "$(date -u +%s%3N)" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --branch main \
+            --changed-list "$RUNNER_TEMP/pantry-changed.list"
+
+      - name: Verify Pantry Core delta publication
+        if: ${{ steps.delta.outputs.needs_publish == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C shelf fetch --quiet --force origin main
+          remote="$(git -C shelf rev-parse refs/remotes/origin/main)"
+          message="$(git -C shelf show -s --format=%B "$remote")"
+          grep -Fxq "Pantry-Source: ${{ steps.delta.outputs.target }}" <<<"$message"
+          grep -Fxq "History-Mode: root-only" <<<"$message"
+          test "$(git -C shelf rev-list --parents -n 1 "$remote" | wc -w | tr -d ' ')" -eq 1
+          bad="$(git -C shelf ls-tree -r --name-only "$remote" kyron | grep -Ev '^kyron/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{28}\.bin$' || true)"
+          test -z "$bad"
+          echo "[PANTRY-DELTA][PUBLISHED][OK] pantry=${{ steps.delta.outputs.target }} core=$remote"
+
+      - name: Checkpoint private route state
+        if: ${{ steps.delta.outputs.needs_publish == 'true' }}
+        shell: bash
+        env:
+          TARGET_SHA: ${{ steps.delta.outputs.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p filling/release
+          state="filling/release/pantry-core-route-state.ini"
+          pin="$(sed -n '1s/^; Pantry-Source: //p' "$state" | tr -d '\r')"
+          [[ "$pin" == "$TARGET_SHA" ]] || { echo "::error::Prepared route state is not pinned to the published Pantry source"; exit 1; }
+          git -C filling checkout -- SrcVersion.ini
+          remote="$(git -C filling ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [[ "$remote" != "$TARGET_SHA" ]]; then
+            echo "::warning::Pantry/main advanced during publication; route state checkpoint skipped and will be regenerated by the next delta"
+            exit 0
+          fi
+          git -C filling add --sparse -- release/pantry-core-route-state.ini
+          if git -C filling diff --cached --quiet; then
+            echo "[PANTRY-DELTA][STATE] unchanged"
+            exit 0
+          fi
+          git -C filling -c user.name=pvtkyron -c user.email=117467541+pvtkyron@users.noreply.github.com commit -m 'pantry: checkpoint Pantry Core route state [control-state]'
+          git -C filling push origin HEAD:main
+          echo "[PANTRY-DELTA][STATE][PUSHED] base=$TARGET_SHA"
+
+      - name: Remove temporary signer public keys
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/pantry-bootstrap-public.pem" "$RUNNER_TEMP/pantry-content-public.pem"

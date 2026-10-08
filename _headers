@@ -1,0 +1,20 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Strict-Transport-Security: max-age=31536000
+  X-Permitted-Cross-Domain-Policies: none
+
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+/assets/*
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+
+/dist/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+  Access-Control-Allow-Origin: *
+
+/model/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+  Access-Control-Allow-Origin: *

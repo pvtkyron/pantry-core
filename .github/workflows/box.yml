@@ -1,0 +1,67 @@
+name: Pantry Core mirror gate
+
+on:
+  workflow_call:
+    inputs:
+      capsule:
+        required: true
+        type: string
+      runtime_channel:
+        required: false
+        default: both
+        type: string
+      include_launcher:
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  publish:
+    name: Wait for canonical Pantry mirror
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Open capsule helper
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: .github/actions/private-capsule
+
+      - name: Open private delivery state
+        id: state
+        uses: ./recipe/.github/actions/private-capsule
+        with:
+          mode: open
+          key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          capsule: ${{ inputs.capsule }}
+          project: workspace
+
+      - name: Publish exact Pantry revision through canonical mirror
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PANTRY_SHA: ${{ steps.state.outputs.pantry_ref }}
+        run: |
+          set -euo pipefail
+          sha="${PANTRY_SHA,,}"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::invalid Pantry delivery ref"; exit 1; }
+          gh workflow run pantry-mirror.yml -R "$GITHUB_REPOSITORY" --ref main -f pantry_sha="$sha"
+          echo "[PANTRY/PUBLISH][MIRROR/DISPATCHED] source=$sha"
+          for _ in $(seq 1 420); do
+            published="$(gh api "repos/${GITHUB_REPOSITORY}/commits?sha=main&per_page=50" --jq '[.[] | .commit.message | capture("Pantry-Source: (?<sha>[0-9a-f]{40})")? | select(.sha != null) | .sha][0] // ""')"
+            if [[ "$published" == "$sha" ]]; then
+              echo "[PANTRY/PUBLISH][OK] source=$sha"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Pantry Core mirror did not publish source=$sha"
+          exit 1
