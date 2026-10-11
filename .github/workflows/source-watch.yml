@@ -1,0 +1,205 @@
+name: Workspace · SDK · Web Router
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/source-watch.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '23 */6 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: component-source-router
+  cancel-in-progress: true
+
+jobs:
+  # Lightweight router only. Heavy/full reconciliation stays in the six-hour Patisserie workflow.
+  watch:
+    name: Route Workspace SDK and Web changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      POLL_SECONDS: '60'
+    steps:
+      - name: Open Workspace tracker and registry
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: workspace
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+          sparse-checkout: |
+            .kyron/private-projects.json
+            .kyron/control/request.json
+          sparse-checkout-cone-mode: false
+
+      - name: Read private project registry
+        id: registry
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=Join-Path $PWD.Path 'workspace/.kyron/private-projects.json'
+          if(!(Test-Path -LiteralPath $path -PathType Leaf)){throw 'private project registry unavailable'}
+          $r=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json
+          if([int]$r.schema-ne1){throw 'private project registry schema rejected'}
+          $sdk=([string]$r.projects.sdk).Trim();$web=([string]$r.projects.web).Trim()
+          foreach($value in @($sdk,$web)){
+            if($value-notmatch'^[^/\s]+/[^/\s]+$'){throw 'private project registry entry rejected'}
+            Write-Host "::add-mask::$value"
+          }
+          "sdk_repo=$sdk" >> $env:GITHUB_OUTPUT
+          "web_repo=$web" >> $env:GITHUB_OUTPUT
+          Write-Host '[SOURCE-ROUTER][REGISTRY][OK]'
+
+      - name: Open SDK tracker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.registry.outputs.sdk_repo }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: sdk
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+          sparse-checkout: |
+            sdk/ANO_SDK.hpp
+          sparse-checkout-cone-mode: false
+
+      - name: Open Web tracker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.registry.outputs.web_repo }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: web
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+          sparse-checkout: |
+            kyron-suite/v11.5.0/package.json
+          sparse-checkout-cone-mode: false
+
+      - name: Route component changes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dispatch_api='repos/pvtkyron/pantry-core/dispatches'
+
+          source_head() {
+            local root="$1" sha attempt
+            for attempt in 1 2 3 4 5; do
+              if git -C "$root" fetch --quiet --no-tags --prune origin '+refs/heads/main:refs/remotes/origin/main'; then
+                sha="$(git -C "$root" rev-parse refs/remotes/origin/main 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+                if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+                  printf '%s\n' "$sha"
+                  return 0
+                fi
+              fi
+              sleep $((attempt * 2))
+            done
+            echo "::error title=Component source router::unable to resolve ${root}/main" >&2
+            return 1
+          }
+
+          dispatch_component() {
+            local event="$1" native_scope="${2:-}"
+            if [[ -n "$native_scope" ]]; then
+              jq -n --arg event "$event" --arg native_scope "$native_scope" '{event_type:$event,client_payload:{source_router:true,native_scope:$native_scope}}'
+            else
+              jq -n --arg event "$event" '{event_type:$event,client_payload:{source_router:true}}'
+            fi | gh api --method POST "$dispatch_api" --input - >/dev/null
+            echo "[SOURCE-ROUTER][DISPATCH] $event native_scope=${native_scope:-default}"
+          }
+
+          workspace_seen="$(source_head workspace)"
+          sdk_seen="$(source_head sdk)"
+          web_seen="$(source_head web)"
+          echo "[SOURCE-ROUTER][READY] poll_seconds=${POLL_SECONDS}"
+
+          deadline=$((SECONDS + 20700))
+          while (( SECONDS < deadline )); do
+            sleep "$POLL_SECONDS"
+
+            workspace_next="$(source_head workspace)"
+            sdk_next="$(source_head sdk)"
+            web_next="$(source_head web)"
+
+            if [[ "$workspace_next" != "$workspace_seen" ]]; then
+              changed="$(git -C workspace diff --name-only "$workspace_seen" "$workspace_next" -- || true)"
+              echo "[SOURCE-ROUTER][WORKSPACE] from=$workspace_seen to=$workspace_next"
+              printf '%s\n' "$changed" | sed '/^$/d' | head -n 80
+
+              common=false
+              launcher=false
+              lib=false
+              nativebridge=false
+              dex=false
+              apk=false
+              control=false
+
+              # These C++ contract headers are consumed by Launcher and Vera Lib only.
+              common_paths="$(grep -Ev '^src/common/Shared/(SrcVersionBlob|SrcVersionRouteState)\.hpp$' <<<"$changed" || true)"
+              grep -Eq '^(PantryPublisher/|scripts/|security/|toolchains\.lock\.json$|src/common/)' <<<"$common_paths" && common=true || true
+              if grep -Eq '^src/common/Shared/(SrcVersionBlob|SrcVersionRouteState)\.hpp$' <<<"$changed"; then
+                launcher=true
+                lib=true
+              fi
+              grep -Eq '^(src/windows/Launcher/|src/windows/Bootstrap/)' <<<"$changed" && launcher=true || true
+              grep -Eq '^src/android/VeraInternal/' <<<"$changed" && lib=true || true
+              if grep -Eq '^src/android/NativeBridgeRuntime/' <<<"$changed"; then
+                lib=true
+                nativebridge=true
+              fi
+              grep -Eq '^src/android/KyronVM/' <<<"$changed" && apk=true || true
+              grep -Eq '^(src/android/RevEngine/|src/android/KyronLink/)' <<<"$changed" && apk=true || true
+              grep -Fxq '.kyron/control/request.json' <<<"$changed" && control=true || true
+
+              if [[ "$common" == true ]]; then
+                launcher=true
+                lib=true
+                nativebridge=true
+                dex=true
+                apk=true
+              fi
+              [[ "$launcher" == true ]] && dispatch_component component-launcher
+              if [[ "$lib" == true ]]; then
+                if [[ "$nativebridge" == true ]]; then
+                  dispatch_component component-lib all
+                else
+                  dispatch_component component-lib vera
+                fi
+              fi
+              [[ "$dex" == true ]] && dispatch_component component-dex
+              [[ "$apk" == true ]] && dispatch_component component-apk
+              [[ "$control" == true ]] && dispatch_component kyron-laptop-control
+
+              workspace_seen="$workspace_next"
+            fi
+
+            if [[ "$sdk_next" != "$sdk_seen" ]]; then
+              echo "[SOURCE-ROUTER][SDK] from=$sdk_seen to=$sdk_next"
+              dispatch_component component-sdk
+              sdk_seen="$sdk_next"
+            fi
+
+            if [[ "$web_next" != "$web_seen" ]]; then
+              echo "[SOURCE-ROUTER][WEB] from=$web_seen to=$web_next"
+              dispatch_component component-web
+              web_seen="$web_next"
+            fi
+
+          done
+
+          echo '[SOURCE-ROUTER][ROTATE] router window complete'

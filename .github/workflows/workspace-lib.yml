@@ -1,0 +1,279 @@
+name: Workspace native library lane
+
+on:
+  workflow_call:
+    inputs:
+      capsule:
+        required: true
+        type: string
+      include_nativebridge:
+        required: false
+        default: true
+        type: boolean
+      direct_publish:
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Compile Android native libraries
+    runs-on: windows-2025
+    timeout-minutes: 240
+    env:
+      KYRON_SERIAL_BUILD: '1'
+      KYRON_BUILD_JOBS: '2'
+      KYRON_HEARTBEAT_SECONDS: '30'
+      ANDROID_HOME: ''
+      ANDROID_SDK_ROOT: ''
+      ANDROID_NDK_HOME: ''
+      ANDROID_NDK_ROOT: ''
+      NDK_ROOT: ''
+      JAVA_HOME: ''
+    steps:
+      - name: Open lane recipe
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: |
+            .github/actions/private-capsule
+            .github/workflows/workspace-handoff.ps1
+
+      - name: Open private source state
+        id: state
+        uses: ./recipe/.github/actions/private-capsule
+        with:
+          mode: open
+          key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          capsule: ${{ inputs.capsule }}
+          project: workspace
+
+      - name: Open private Workspace
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.state.outputs.workspace_repo }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: ${{ steps.state.outputs.workspace_ref }}
+          path: source
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: |
+            .gitignore
+            PantryPublisher
+            Tools
+            scripts
+            security
+            toolchains.lock.json
+            src/android/VeraInternal
+            src/android/NativeBridgeRuntime
+            src/common/Shared
+          sparse-checkout-cone-mode: false
+
+      - name: Open pinned Pantry
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.state.outputs.pantry_repo }}
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: ${{ steps.state.outputs.pantry_ref }}
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: ${{ inputs.direct_publish }}
+          show-progress: false
+          sparse-checkout: |
+            SrcVersion.ini
+            lib
+            nativebridge
+            release
+            security
+            tools
+          sparse-checkout-cone-mode: false
+
+      - name: Bind release source branches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($repo in @('source','filling')){& git -C $repo checkout -q -B main HEAD;if($LASTEXITCODE){throw "release main binding rejected: $repo"}}
+
+      - name: Materialize canonical Pantry trust
+        shell: pwsh
+        env:
+          CREAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+          CREAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+          JAM_A: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+          JAM_B: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($n in @('CREAM_A','CREAM_B','JAM_A','JAM_B')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical local Pantry signer input missing: $n"}}
+          . .\source\scripts\workspace-common.ps1
+          $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1';New-Item -ItemType Directory -Force -Path $root|Out-Null;$utf8=[Text.UTF8Encoding]::new($false)
+          foreach($x in @(@('bootstrap_root_private.pem','CREAM_A'),@('bootstrap_root_public.pem','CREAM_B'),@('content_private.pem','JAM_A'),@('content_public.pem','JAM_B'))){[IO.File]::WriteAllText((Join-Path $root $x[0]),([Environment]::GetEnvironmentVariable($x[1])).Trim()+"`n",$utf8)}
+          & .\source\PantryPublisher\Initialize-LocalPantrySigner.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -Workspace (Join-Path $PWD.Path 'source') -ExpectedProfile local-machine-v1 -Ephemeral -RequireExistingIdentity|Out-Null
+          if(!$?){throw 'Canonical local Pantry trust generation failed'}
+          $trust=Join-Path $PWD.Path 'source\src\android\VeraInternal\jni\Protection\PantryLocalTrust.generated.hpp';if(!(Test-Path -LiteralPath $trust -PathType Leaf)){throw 'VeraInternal generated Pantry trust header is unavailable'}
+          Write-Host '[PROJECT/WORKSPACE/LIB/TRUST][OK] canonical local-machine-v1 header materialized'
+
+      - name: Materialize canonical native code signer
+        shell: pwsh
+        env:
+          PFX_B64: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
+          PFX_PASS: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($n in @('PFX_B64','PFX_PASS')){if([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))){throw "canonical code signer input missing: $n"}}
+          $meta=Get-Content -LiteralPath './source/security/signing/canonical-signer.json' -Raw|ConvertFrom-Json;$expected=([string]$meta.certificate_sha256).Trim().ToLowerInvariant()
+          if($expected-notmatch'^[0-9a-f]{64}$'){throw 'canonical code signer SHA256 pin is invalid'}
+          $root=Join-Path $env:RUNNER_TEMP 'kyron-native-codesign';New-Item -ItemType Directory -Force -Path $root|Out-Null;$pfx=Join-Path $root 'canonical.pfx'
+          $raw=[Convert]::FromBase64String($env:PFX_B64);[IO.File]::WriteAllBytes($pfx,$raw);$password=$env:PFX_PASS.TrimEnd([char[]]"`r`n")
+          $cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx,$password,[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
+          try{$actual=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($cert.RawData)).ToLowerInvariant();if($actual-ne$expected){throw "canonical code signer pin mismatch: actual=$actual expected=$expected"};if(!$cert.HasPrivateKey){throw 'canonical code signer PFX does not expose a private key'};if(([string]$meta.thumbprint_sha1)-and(([string]$meta.thumbprint_sha1).Replace(' ','').ToUpperInvariant()-ne([string]$cert.Thumbprint).Replace(' ','').ToUpperInvariant())){throw 'canonical code signer SHA1 thumbprint mismatch'}}finally{$cert.Dispose();[Security.Cryptography.CryptographicOperations]::ZeroMemory($raw)}
+          "KYRON_CODESIGN_PFX=$pfx" >> $env:GITHUB_ENV
+          "KYRON_CODESIGN_PASSWORD=$password" >> $env:GITHUB_ENV
+          Write-Host "[PROJECT/WORKSPACE/LIB/CODESIGN][OK] cert=$expected private_key=ephemeral-pfx"
+      - name: Chill toolchains
+        if: ${{ inputs.direct_publish == false }}
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            *-sdk/Android
+            *-sdk/Java
+            *-sdk/Smali
+            *-sdk/LLVMMinGW
+          key: workspace-toolchains-v7-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
+
+      - name: Install managed .NET 8 SDK
+        if: ${{ inputs.direct_publish == false }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Bind managed SDK
+        if: ${{ inputs.direct_publish == false }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          . .\source\scripts\workspace-common.ps1
+          $sdk=Resolve-WorkspaceSdkRoot;$dotnet=(Get-Command dotnet.exe -ErrorAction Stop).Source;$target=Join-Path $sdk 'dotnet\current'
+          New-Item -ItemType Directory -Force (Split-Path $target -Parent)|Out-Null
+          if(!(Test-Path -LiteralPath $target -PathType Container)){New-Item -ItemType Junction -Path $target -Target (Split-Path $dotnet -Parent)|Out-Null}
+          if(!(Test-Path -LiteralPath (Join-Path $target 'dotnet.exe') -PathType Leaf)){throw 'Canonical managed .NET SDK binding is unavailable'}
+
+      - name: Ensure canonical Workspace toolchain
+        if: ${{ inputs.direct_publish == false }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\source\scripts\ensure-workspace-toolchain.ps1
+          if(!$?){throw 'Canonical Workspace toolchain bootstrap failed'}
+
+      - name: Prepare only pinned Android NDK for component lane
+        if: ${{ inputs.direct_publish }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          . .\source\scripts\workspace-common.ps1
+          $sdk=Resolve-WorkspaceSdkRoot
+          & .\source\scripts\repair-pinned-ndk.ps1 -SdkRoot $sdk
+          if(!$?){throw 'Component native NDK bootstrap failed'}
+          & .\source\scripts\setup-windows-toolchain.ps1 -SdkRoot $sdk
+          if(!$?){throw 'Component native LLVM-MinGW bootstrap failed'}
+          $ndk=Join-Path $sdk 'Android\sdk\ndk\28.0.13004108'
+          $llvm=Join-Path $sdk 'LLVMMinGW\current'
+          if(!(Test-Path -LiteralPath (Join-Path $ndk 'ndk-build.cmd') -PathType Leaf)){throw 'Component native NDK is unavailable'}
+          if(!(Test-Path -LiteralPath (Join-Path $llvm 'bin\clang++.exe') -PathType Leaf)){throw 'Component native LLVM-MinGW is unavailable'}
+          "KYRON_CANONICAL_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
+          "KYRON_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
+          "KYRON_NDK=$ndk" >> $env:GITHUB_ENV
+          "ANDROID_NDK_HOME=$ndk" >> $env:GITHUB_ENV
+          "KYRON_LLVM_MINGW=$llvm" >> $env:GITHUB_ENV
+          Write-Host "[COMPONENT/LIB/TOOLCHAIN][OK] ndk+llvm-only sdk=$sdk ndk=$ndk llvm=$llvm shared 6GB toolchain cache bypassed"
+
+      - name: Compile VeraInternal libraries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:KYRON_PANTRY_ROOT=Join-Path $PWD.Path 'filling';$env:KYRON_PANTRY_SIGNER_PROFILE='local-machine-v1'
+          $env:KYRON_MODE='compact'
+          & .\source\src\android\VeraInternal\Vera.bat build
+          if($LASTEXITCODE){throw "VeraInternal release library lane failed rc=$LASTEXITCODE"}
+
+      - name: Compile NativeBridge library kit
+        if: ${{ inputs.include_nativebridge }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $old=$env:KYRON_NONINTERACTIVE;try{$env:KYRON_NONINTERACTIVE='1';& .\source\src\android\NativeBridgeRuntime\build.bat;if($LASTEXITCODE){throw "NativeBridge release library lane failed rc=$LASTEXITCODE"}}finally{$env:KYRON_NONINTERACTIVE=$old}
+          Write-Host '[PROJECT/WORKSPACE/LIB][OK] VeraInternal + NativeBridge'
+
+      - name: Seal native library lane
+        if: ${{ inputs.direct_publish == false }}
+        id: shard
+        shell: pwsh
+        env:
+          KYRON_HANDOFF_SECRET: ${{ secrets[vars.MIX_KEY_NAME] }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $workspaceSha=(& git -C source rev-parse HEAD).Trim().ToLowerInvariant();$pantrySha=(& git -C filling rev-parse HEAD).Trim().ToLowerInvariant();$out=Join-Path $env:RUNNER_TEMP 'workspace-lib-handoff'
+          $paths=@('src\android\VeraInternal\lib\armeabi-v7a\libkyron.so','src\android\VeraInternal\lib\arm64-v8a\libkyron.so');if('${{ inputs.include_nativebridge }}'-eq'true'){$paths+='src\android\NativeBridgeRuntime\lib'}
+          & .\recipe\.github\workflows\workspace-handoff.ps1 -Mode pack -Lane lib -PantryRoot (Join-Path $PWD.Path 'filling') -WorkspaceSha $workspaceSha -PantrySha $pantrySha -Secret $env:KYRON_HANDOFF_SECRET -SourceRoot (Join-Path $PWD.Path 'source') -Paths $paths -OutputRoot $out
+
+      - name: Upload encrypted native lane
+        if: ${{ inputs.direct_publish == false }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: kyron-workspace-lib-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.shard.outputs.root }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
+
+      - name: Install minimal Python for direct component promotion
+        if: ${{ inputs.direct_publish }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Promote only native outputs directly to Pantry
+        if: ${{ inputs.direct_publish }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          . .\source\scripts\workspace-common.ps1
+          $python=(Get-Command python.exe -ErrorAction Stop).Source
+          $managed=Get-WorkspaceManagedSdkRoot
+          $target=Join-Path $managed 'Python\current'
+          New-Item -ItemType Directory -Force (Split-Path $target -Parent)|Out-Null
+          if(Test-Path -LiteralPath $target){Remove-Item -LiteralPath $target -Force -Recurse}
+          New-Item -ItemType Junction -Path $target -Target (Split-Path $python -Parent)|Out-Null
+          $plan=if('${{ inputs.include_nativebridge }}'-eq'true'){'runtime'}else{'lib'}
+          & .\source\PantryPublisher\Update-PantryArtifacts.ps1 -PantryPath (Join-Path $PWD.Path 'filling') -RuntimeChannel both -ArtifactPlan $plan -SkipBuild -WorkspaceStatePrevalidated -PreservedLaneReceiptOnly
+          if(!$?){throw "Direct native Pantry promotion failed: $plan"}
+          Write-Host "[COMPONENT/LIB/PANTRY][OK] plan=$plan handoff=none"
+
+      - name: Remove ephemeral native code signer
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $pfx=$env:KYRON_CODESIGN_PFX
+          if(![string]::IsNullOrWhiteSpace($pfx)-and(Test-Path -LiteralPath $pfx -PathType Leaf)){$len=(Get-Item -LiteralPath $pfx).Length;if($len-gt0){[IO.File]::WriteAllBytes($pfx,(New-Object byte[] $len))};$root=Split-Path -Parent $pfx;Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue}
+          Write-Host '[PROJECT/WORKSPACE/LIB/CODESIGN][CLEAN] ephemeral PFX removed'
+
+      - name: Remove ephemeral Pantry trust material
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          if(Test-Path '.\source\scripts\workspace-common.ps1'){
+            . .\source\scripts\workspace-common.ps1
+            $root=Join-Path (Get-WorkspaceDataRoot) 'SigningKeys\PantryLocal\v1'
+            if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}
+          }

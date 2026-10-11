@@ -1,0 +1,30 @@
+name: Component · DEX
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [component-dex]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: component-dex
+  cancel-in-progress: true
+
+jobs:
+  sources:
+    name: Pin source batch
+    uses: ./.github/workflows/source-pin-component.yml
+    secrets: inherit
+
+  dex:
+    name: DEX · Java + D8 only
+    needs: sources
+    if: ${{ needs.sources.result == 'success' }}
+    uses: ./.github/workflows/workspace-java.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      include_launcher: false
+      component_mode: true
+    secrets: inherit

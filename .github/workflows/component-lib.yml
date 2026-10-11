@@ -1,0 +1,43 @@
+name: Component · Native Lib
+run-name: "KYRON signed native release · ${{ github.run_id }}"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/component-lib.yml'
+      - '.github/workflows/workspace-lib.yml'
+  workflow_dispatch:
+    inputs:
+      native_scope:
+        description: Native component scope
+        required: false
+        default: vera
+        type: choice
+        options: [vera, all]
+  repository_dispatch:
+    types: [component-lib]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: component-native-lib
+  cancel-in-progress: true
+
+jobs:
+  sources:
+    name: Pin source batch
+    uses: ./.github/workflows/source-pin-component.yml
+    secrets: inherit
+
+  lib:
+    name: Lib · Android native only
+    needs: sources
+    if: ${{ needs.sources.result == 'success' }}
+    uses: ./.github/workflows/workspace-lib.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      include_nativebridge: ${{ (github.event_name == 'workflow_dispatch' && inputs.native_scope != 'vera') || (github.event_name == 'repository_dispatch' && github.event.client_payload.native_scope != 'vera') }}
+      direct_publish: true
+    secrets: inherit

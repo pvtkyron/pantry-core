@@ -1,0 +1,29 @@
+name: Component · APK
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [component-apk]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: component-apk
+  cancel-in-progress: true
+
+jobs:
+  sources:
+    name: Pin source batch
+    uses: ./.github/workflows/source-pin-component.yml
+    secrets: inherit
+
+  apk:
+    name: APK · RevEngine only
+    needs: sources
+    if: ${{ needs.sources.result == 'success' }}
+    uses: ./.github/workflows/workspace-apk.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      component_mode: true
+    secrets: inherit

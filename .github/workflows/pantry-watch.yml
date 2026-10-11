@@ -1,0 +1,133 @@
+name: Pantry Component Router
+# Startup catch-up compares published Pantry-Source before entering the live poll loop.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pantry-watch.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '41 */6 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pantry-component-router
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: Watch Pantry main and route component changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      POLL_SECONDS: '60'
+    steps:
+      - name: Open private Pantry tracker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pvtkyron/pantry
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: main
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+          sparse-checkout: |
+            SrcVersion.ini
+          sparse-checkout-cone-mode: false
+
+      - name: Watch Pantry SHA continuously
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dispatch_api='repos/pvtkyron/pantry-core/dispatches'
+
+          pantry_sha() {
+            local sha attempt
+            for attempt in 1 2 3 4 5; do
+              if git -C filling fetch --quiet --no-tags --prune origin '+refs/heads/main:refs/remotes/origin/main'; then
+                sha="$(git -C filling rev-parse refs/remotes/origin/main 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+                if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+                  printf '%s\n' "$sha"
+                  return 0
+                fi
+              fi
+              sleep $((attempt * 2))
+            done
+            echo '::error title=Pantry watcher::unable to resolve private Pantry main through checkout credentials' >&2
+            return 1
+          }
+
+          dispatch_component() {
+            local event="$1" sha="$2"
+            jq -n --arg event "$event" --arg sha "$sha" '{event_type:$event,client_payload:{pantry_sha:$sha,pantry_router:true}}' \
+              | gh api --method POST "$dispatch_api" --input - >/dev/null
+            echo "[PANTRY-WATCH][DISPATCH] event=${event} pantry=${sha}"
+          }
+
+          published_pantry_sha() {
+            gh api "repos/${GITHUB_REPOSITORY}/commits?sha=main&per_page=100" \
+              --jq '[.[] | .commit.message | capture("Pantry-Source: (?<sha>[0-9a-f]{40})")? | select(.sha != null) | .sha][0] // ""'
+          }
+
+          route_change() {
+            local previous="$1" next="$2" changed
+            if [[ "$previous" == "$next" ]]; then
+              return 0
+            fi
+            if ! git -C filling cat-file -e "$previous^{commit}" 2>/dev/null; then
+              git -C filling fetch --quiet --no-tags --depth=1 origin "$previous"
+            fi
+            changed="$(git -C filling diff --name-only "$previous" "$next" -- || true)"
+            echo "[PANTRY-WATCH][CHANGE] from=${previous} to=${next}"
+            printf '%s\n' "$changed" | sed '/^$/d' | head -n 80
+            if grep -Eq '^(lua/|img/|tools/lua53_pubg\.py$)' <<<"$changed"; then
+              dispatch_component component-lua "$next"
+            fi
+            if grep -Eq '^src/' <<<"$changed"; then
+              dispatch_component component-dex "$next"
+            fi
+            if grep -Eq '^(auth/|client/|lib/|lua/|assest/|Font/|img/|nativebridge/|dist/|vm/)' <<<"$changed"; then
+              dispatch_component pantry-delta "$next"
+            elif grep -Eqv '^(release/|tools/|tests/|security/|README\.md$|AI_README\.md$|00_AI_READ_FIRST\.md$|memory\.md$|\.gitattributes$|\.gitignore$)' <<<"$changed"; then
+              echo "[PANTRY-WATCH][FULL-ONLY] non-delta Pantry change detected; six-hour reconcile remains fallback"
+            else
+              echo "[PANTRY-WATCH][CONTROL-ONLY] no Pantry Core content publication required"
+            fi
+          }
+
+          last_seen="$(pantry_sha)"
+          published="$(published_pantry_sha)"
+          if [[ "$published" =~ ^[0-9a-f]{40}$ && "$published" != "$last_seen" ]]; then
+            echo "[PANTRY-WATCH][CATCH-UP] published=${published} pantry=${last_seen}"
+            route_change "$published" "$last_seen"
+          elif [[ -z "$published" ]]; then
+            echo "[PANTRY-WATCH][CATCH-UP] no published Pantry-Source found; request delta reconciliation"
+            dispatch_component pantry-delta "$last_seen"
+          else
+            echo "[PANTRY-WATCH][CATCH-UP] already current pantry=${last_seen}"
+          fi
+          echo "[PANTRY-WATCH][READY] pantry=${last_seen} poll_seconds=${POLL_SECONDS}"
+
+          # The router rotates every six hours. Scheduled replacements start
+          # quietly so they do not create duplicate mirror publishes.
+          deadline=$((SECONDS + 20700))
+          while (( SECONDS < deadline )); do
+            sleep "$POLL_SECONDS"
+            next="$(pantry_sha)"
+            if [[ "$next" == "$last_seen" ]]; then
+              continue
+            fi
+
+            previous="$last_seen"
+            last_seen="$next"
+            route_change "$previous" "$next"
+          done
+
+          echo '[PANTRY-WATCH][ROTATE] watcher window complete'

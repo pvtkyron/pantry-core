@@ -1,0 +1,61 @@
+name: Component · Lua
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [component-lua]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: component-lua
+  cancel-in-progress: true
+
+jobs:
+  lua:
+    name: Lua · 5.3 compile + PUBG transform
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Open Lua source only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: pvtkyron/pantry
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: main
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: |
+            lua
+            tools/lua53_pubg.py
+          sparse-checkout-cone-mode: false
+
+      - name: Install Lua 5.3 compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends lua5.3
+          luac5.3 -v 2>&1 | grep -F 'Lua 5.3.6'
+
+      - name: Compile every Lua source independently
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/kyron-lua"
+          mkdir -p "$out"
+          count=0
+          while IFS= read -r -d '' source; do
+            rel="${source#filling/lua/}"
+            target="$out/${rel}.bin"
+            mkdir -p "$(dirname "$target")"
+            python filling/tools/lua53_pubg.py "$source" -o "$target" --compiler "$(command -v luac5.3)"
+            test -s "$target"
+            count=$((count + 1))
+          done < <(find filling/lua -type f -name '*.lua' -print0)
+          test "$count" -gt 0
+          echo "[COMPONENT/LUA][OK] compiled=$count"

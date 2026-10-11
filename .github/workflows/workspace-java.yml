@@ -1,0 +1,228 @@
+name: Workspace Java lane
+
+on:
+  workflow_call:
+    inputs:
+      capsule:
+        required: true
+        type: string
+      include_launcher:
+        required: false
+        default: false
+        type: boolean
+      component_mode:
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  java:
+    name: Compile Pantry Java + D8
+    runs-on: windows-2025
+    timeout-minutes: 120
+    env:
+      KYRON_SERIAL_BUILD: '1'
+      KYRON_BUILD_JOBS: '2'
+      ANDROID_HOME: ''
+      ANDROID_SDK_ROOT: ''
+      ANDROID_NDK_HOME: ''
+      ANDROID_NDK_ROOT: ''
+      NDK_ROOT: ''
+      JAVA_HOME: ''
+    steps:
+      - name: Open lane recipe
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: |
+            .github/actions/private-capsule
+            .github/workflows/workspace-handoff.ps1
+
+      - name: Open private source state
+        id: state
+        uses: ./recipe/.github/actions/private-capsule
+        with:
+          mode: open
+          key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          capsule: ${{ inputs.capsule }}
+          project: workspace
+
+      - name: Open private Workspace
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.state.outputs.workspace_repo }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: ${{ steps.state.outputs.workspace_ref }}
+          path: source
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+          sparse-checkout: |
+            PantryPublisher
+            Tools
+            scripts
+            toolchains.lock.json
+          sparse-checkout-cone-mode: false
+
+      - name: Open pinned Pantry
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.state.outputs.pantry_repo }}
+          token: ${{ secrets[vars.FILL_KEY_NAME] }}
+          ref: ${{ steps.state.outputs.pantry_ref }}
+          path: filling
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+          sparse-checkout: |
+            SrcVersion.ini
+            src
+            tools
+            dist/InputHost.dex
+          sparse-checkout-cone-mode: false
+
+      - name: Bind release source branches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($repo in @('source','filling')){& git -C $repo checkout -q -B main HEAD;if($LASTEXITCODE){throw "release main binding rejected: $repo"}}
+
+      - name: Chill toolchains
+        if: ${{ inputs.component_mode == false }}
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            *-sdk/Android
+            *-sdk/Java
+            *-sdk/Smali
+            *-sdk/LLVMMinGW
+          key: workspace-toolchains-v7-${{ runner.os }}-${{ hashFiles('source/toolchains.lock.json') }}
+
+      - name: Install managed .NET 8 SDK
+        if: ${{ inputs.component_mode == false }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Bind managed SDK
+        if: ${{ inputs.component_mode == false }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          . .\source\scripts\workspace-common.ps1
+          $sdk=Resolve-WorkspaceSdkRoot;$dotnet=(Get-Command dotnet.exe -ErrorAction Stop).Source;$target=Join-Path $sdk 'dotnet\current'
+          New-Item -ItemType Directory -Force (Split-Path $target -Parent)|Out-Null
+          if(!(Test-Path -LiteralPath $target -PathType Container)){New-Item -ItemType Junction -Path $target -Target (Split-Path $dotnet -Parent)|Out-Null}
+          $bound=Join-Path $target 'dotnet.exe';if(!(Test-Path -LiteralPath $bound -PathType Leaf)){throw 'Canonical managed .NET SDK binding is unavailable'}
+
+      - name: Ensure canonical Workspace toolchain
+        if: ${{ inputs.component_mode == false }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\source\scripts\ensure-workspace-toolchain.ps1
+          if(!$?){throw 'Canonical Workspace toolchain bootstrap failed'}
+
+      - name: Install pinned JDK for DEX component
+        if: ${{ inputs.component_mode }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17.0.20+8'
+
+      - name: Prepare minimal DEX toolchain only
+        if: ${{ inputs.component_mode }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          . .\source\scripts\workspace-common.ps1
+          $sdk=Resolve-WorkspaceSdkRoot
+          $jdkTarget=$env:JAVA_HOME
+          if(!(Test-Path -LiteralPath (Join-Path $jdkTarget 'bin\javac.exe') -PathType Leaf)){throw 'Pinned component JDK is unavailable'}
+          $locked=Join-Path $sdk 'Java\17.0.20'
+          $current=Join-Path $sdk 'Java\current'
+          foreach($link in @($locked,$current)){
+            if(Test-Path -LiteralPath $link){Remove-Item -LiteralPath $link -Recurse -Force}
+            New-Item -ItemType Directory -Force -Path (Split-Path $link -Parent)|Out-Null
+            New-Item -ItemType Junction -Path $link -Target $jdkTarget|Out-Null
+          }
+          & .\source\scripts\setup-android-minimal.ps1 -SdkRoot $sdk
+          if(!$?){throw 'Minimal component DEX Android surface bootstrap failed'}
+          "KYRON_CANONICAL_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
+          "KYRON_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
+          Write-Host "[COMPONENT/DEX/TOOLCHAIN][OK] jdk=17.0.20 android=minimal no-ndk no-smali no-llvm sdk=$sdk"
+
+      - name: Compile Java source lane
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $plan='runtime'
+          $pin='${{ steps.state.outputs.pantry_ref }}'
+          if($pin -cnotmatch '^[0-9a-f]{40}$'){throw 'Authenticated Pantry capsule pin rejected'}
+          $args=@{PantryPath=(Join-Path $PWD.Path 'filling');ArtifactPlan=$plan;PinnedPantrySha=$pin}
+          if('${{ inputs.component_mode }}'-eq'true'){
+            $out=Join-Path $env:RUNNER_TEMP 'InputHost.dex'
+            $args.OutputDexPath=$out
+            "KYRON_COMPONENT_DEX=$out" >> $env:GITHUB_ENV
+          }
+          & .\source\PantryPublisher\Preflight-PantryRelease.ps1 @args
+          if(!$?){throw 'Pantry Java/JAR/D8 lane failed'}
+          Write-Host "[PROJECT/WORKSPACE/JAVA][OK] plan=$plan component=${{ inputs.component_mode }}"
+
+      - name: Push only generated DEX to Pantry
+        if: ${{ inputs.component_mode }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pantry=Join-Path $PWD.Path 'filling'
+          $base=(& git -C $pantry rev-parse HEAD).Trim().ToLowerInvariant()
+          if($base-notmatch'^[0-9a-f]{40}$'){throw 'DEX Pantry base SHA rejected'}
+          if(!(Test-Path -LiteralPath $env:KYRON_COMPONENT_DEX -PathType Leaf)){throw 'Canonical DEX output missing'}
+          $dest=Join-Path $pantry 'dist\InputHost.dex'
+          New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent)|Out-Null
+          Copy-Item -LiteralPath $env:KYRON_COMPONENT_DEX -Destination $dest -Force
+          $changed=@(& git -C $pantry status --porcelain --untracked-files=all | ForEach-Object{if($_.Length-gt3){$_.Substring(3).Trim().Trim('"').Replace('\','/')}} | Where-Object{$_})
+          $bad=@($changed|Where-Object{$_-ne'dist/InputHost.dex'})
+          if($bad.Count){throw "DEX component escaped its single-file allowlist:`n$($bad-join"`n")"}
+          if(!$changed.Count){Write-Host '[COMPONENT/DEX/PANTRY][UNCHANGED] dist/InputHost.dex';exit 0}
+          & git -C $pantry add --sparse -- dist/InputHost.dex
+          if($LASTEXITCODE){throw 'DEX git add failed'}
+          & git -C $pantry -c user.name=pvtkyron -c user.email=117467541+pvtkyron@users.noreply.github.com commit -m 'pantry: refresh InputHost.dex [local-publish]'
+          if($LASTEXITCODE){throw 'DEX Pantry commit failed'}
+          $candidate=(& git -C $pantry rev-parse HEAD).Trim().ToLowerInvariant()
+          & git -C $pantry -c http.https://github.com.proxy= push "--force-with-lease=refs/heads/main:$base" origin HEAD:main
+          if($LASTEXITCODE){throw 'DEX Pantry push failed or Pantry/main moved'}
+          Write-Host "[COMPONENT/DEX/PANTRY][PUSHED] file=dist/InputHost.dex commit=$candidate bytes=$((Get-Item -LiteralPath $dest).Length)"
+
+      - name: Seal Java lane proof
+        if: ${{ inputs.component_mode == false }}
+        id: shard
+        shell: pwsh
+        env:
+          KYRON_HANDOFF_SECRET: ${{ secrets[vars.MIX_KEY_NAME] }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $workspaceSha=(& git -C source rev-parse HEAD).Trim().ToLowerInvariant();$pantrySha=(& git -C filling rev-parse HEAD).Trim().ToLowerInvariant()
+          if($pantrySha -ne '${{ steps.state.outputs.pantry_ref }}'){throw 'Java lane Pantry SHA moved after pinned compilation'}
+          $out=Join-Path $env:RUNNER_TEMP 'workspace-java-handoff'
+          & .\recipe\.github\workflows\workspace-handoff.ps1 -Mode pack -Lane java -PantryRoot (Join-Path $PWD.Path 'filling') -WorkspaceSha $workspaceSha -PantrySha $pantrySha -Secret $env:KYRON_HANDOFF_SECRET -SourceRoot (Join-Path $PWD.Path 'source') -OutputRoot $out
+
+      - name: Upload encrypted Java proof
+        if: ${{ inputs.component_mode == false }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: kyron-workspace-java-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.shard.outputs.root }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: true

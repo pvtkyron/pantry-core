@@ -1,0 +1,163 @@
+# Windows PowerShell 5.1 direct-process compiler fix probe: Workspace 892a343f6a08a345d9c0ce81931f413a90dc3996
+name: Workspace PowerShell regression gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/workspace-powershell-regression.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kyron-workspace-powershell-gate
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Private Workspace PowerShell contracts
+    runs-on: windows-2025
+    timeout-minutes: 18
+    steps:
+      - name: Mask private checkout identity
+        shell: pwsh
+        env:
+          WORKSPACE_REPO: ${{ secrets.MIX_REPO }}
+        run: |
+          if([string]::IsNullOrWhiteSpace($env:WORKSPACE_REPO)){throw 'Private source configuration unavailable'}
+          Write-Host "::add-mask::$env:WORKSPACE_REPO"
+      - name: Check out private Workspace sources
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: workspace
+          fetch-depth: 1
+          fetch-tags: false
+          lfs: false
+          persist-credentials: false
+          show-progress: false
+      - name: Check private source Action ownership
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $PWD.Path 'workspace/.github/workflows'
+          if(Test-Path -LiteralPath $dir -PathType Container){
+            $actions=@(Get-ChildItem -LiteralPath $dir -File | Where-Object {$_.Extension -in '.yml','.yaml'})
+            if($actions.Count){throw 'Private source Actions ownership rejected'}
+          }
+          Write-Host '[WORKSPACE/GATE][ACTIONS][OK]'
+      - name: Run PowerShell safety preflight
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Push-Location 'workspace'
+          try{
+            $ps=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+            & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File 'scripts/assert-powershell-safety.ps1' -Root $PWD.Path
+            if($LASTEXITCODE){throw 'PowerShell source safety rejected'}
+            Write-Host '[WORKSPACE/GATE][SOURCE][OK]'
+          }finally{Pop-Location}
+      - name: Run PowerShell regression contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Push-Location 'workspace'
+          try{
+            $ps=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+            & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File 'scripts/test-powershell-safety.ps1'
+            if($LASTEXITCODE){throw 'PowerShell regression contracts rejected'}
+            Write-Host '[WORKSPACE/GATE][REGRESSION][OK]'
+          }finally{Pop-Location}
+      - name: Verify bounded native compiler, cache and failure handling
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if($PSVersionTable.PSVersion.Major -ne 5){
+            $legacy=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+            & $legacy -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath
+            if($LASTEXITCODE -ne 0){throw "PowerShell 5.1 native compile smoke rejected rc=$LASTEXITCODE"}
+            return
+          }
+          Write-Host '[WORKSPACE/GATE][SHELL] Windows PowerShell 5.1'
+          $p=Join-Path $PWD.Path 'workspace/Tools/BuildWindowsLlvm.ps1'
+          $tokens=$null;$parseErrors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$parseErrors)
+          if(@($parseErrors).Count){throw "LLVM build script parse error: $($parseErrors[0].Message)"}
+          $wanted=@('Get-CompileFileFingerprint','Get-CompileDependencies','Get-CompileFingerprint','Compile','CompileBatch')
+          $all=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true))
+          foreach($name in $wanted){
+            $match=@($all|Where-Object {$_.Name -ceq $name})
+            if($match.Count-ne1){throw "Compiler smoke function missing or duplicated: $name"}
+            . ([scriptblock]::Create($match[0].Extent.Text))
+          }
+          function Ensure-Dir([string]$dir){New-Item -ItemType Directory -Path $dir -Force | Out-Null}
+          function Run([string]$name,[string]$exe,[string[]]$argv){& $exe @argv;if($LASTEXITCODE){throw "$name failed rc=$LASTEXITCODE"}}
+          $tool=Get-Command clang++.exe -CommandType Application -ErrorAction SilentlyContinue|Select-Object -First 1
+          $Cxx=if($tool){$tool.Source}else{Join-Path $env:ProgramFiles 'LLVM/bin/clang++.exe'}
+          if(!(Test-Path -LiteralPath $Cxx -PathType Leaf)){throw 'Windows clang++ unavailable for smoke'}
+          $script:CompileHashCache=@{};$ForceRebuild=$false;$env:KYRON_FAST_COMPILE='1';$env:KYRON_COMPILE_JOBS='3'
+          $root=Join-Path $env:RUNNER_TEMP 'kyron bounded native compiler smoke'
+          Ensure-Dir $root
+          $tasks=[Collections.Generic.List[object]]::new()
+          foreach($i in 1..4){
+            $src=Join-Path $root "unit $i.cpp";$obj=Join-Path $root "unit $i.o"
+            [IO.File]::WriteAllText($src,"int kyron_unit_$i(){return $i;}",[Text.UTF8Encoding]::new($false))
+            $tasks.Add(@{Name="unit-$i";Source=$src;Object=$obj;Flags=[string[]]@('-std=c++20','-O0')})
+          }
+          CompileBatch ($tasks.ToArray())
+          $hashes=[Collections.Generic.List[string]]::new()
+          foreach($t in $tasks){
+            if(!(Test-Path -LiteralPath $t.Object -PathType Leaf)){throw "Native compile artifact missing: $($t.Name)"}
+            $stamp=$t.Object+'.fingerprint'
+            if(!(Test-Path -LiteralPath $stamp -PathType Leaf)){throw "Native compile stamp missing: $($t.Name)"}
+            if(([IO.File]::ReadAllText($stamp).Trim()) -notmatch '^[0-9a-f]{64}$'){throw 'Invalid compile fingerprint'}
+            if((Test-Path -LiteralPath ($t.Object+'.compile.stderr')) -or (Test-Path -LiteralPath ($t.Object+'.compile.stdout'))){throw 'Compiler scratch logs were not cleaned'}
+            $hashes.Add((Get-FileHash -LiteralPath $t.Object -Algorithm SHA256).Hash)
+          }
+          CompileBatch ($tasks.ToArray())
+          for($i=0;$i-lt$tasks.Count;$i++){if((Get-FileHash -LiteralPath $tasks[$i].Object -Algorithm SHA256).Hash -ne $hashes[$i]){throw 'Native compile cache changed a verified object'}}
+          $bad=Join-Path $root 'invalid source.cpp';$badObj=Join-Path $root 'invalid source.o'
+          [IO.File]::WriteAllText($bad,'int broken( {', [Text.UTF8Encoding]::new($false))
+          $failed=$false
+          try{CompileBatch @(@{Name='expected-error';Source=$bad;Object=$badObj;Flags=[string[]]@('-std=c++20','-O0')})}catch{$failed=$_.Exception.Message -match 'compile|failed|error'}
+          if(!$failed -or (Test-Path -LiteralPath ($badObj+'.fingerprint'))){throw 'Compiler failure was not handled fail-closed'}
+          Write-Host '[WORKSPACE/GATE][NATIVE-COMPILE][OK] four compiled, cache stable, bad source rejected'
+
+      - name: Verify obj-only cleanup guard
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $Root=Join-Path $PWD.Path 'workspace'
+          $scriptPath=Join-Path $Root 'Tools/BuildWindowsLlvm.ps1'
+          $tokens=$null;$parseErrors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($scriptPath,[ref]$tokens,[ref]$parseErrors)
+          if(@($parseErrors).Count){throw "LLVM source parser failed: $($parseErrors[0].Message)"}
+          $found=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Reset-Dir'},$true))
+          if($found.Count -ne 1){throw 'Guarded Reset-Dir implementation missing'}
+          . ([scriptblock]::Create($found[0].Extent.Text))
+          $safe=Join-Path $Root ('src/windows/Launcher/obj/__KyronResetGuard_'+$env:GITHUB_RUN_ID)
+          New-Item -ItemType Directory -Path $safe -Force|Out-Null
+          $marker=Join-Path $safe 'marker.txt';[IO.File]::WriteAllText($marker,'owned-fixture')
+          Reset-Dir $safe
+          if(Test-Path -LiteralPath $marker){throw 'Owned obj directory was not reset'}
+          $outside=Join-Path $env:RUNNER_TEMP ('KyronResetGuardOutside_'+$env:GITHUB_RUN_ID)
+          New-Item -ItemType Directory -Path $outside -Force|Out-Null
+          $protected=Join-Path $outside 'must-survive.txt';[IO.File]::WriteAllText($protected,'protected')
+          $blocked=$false
+          try{Reset-Dir $outside}catch{$blocked=$true}
+          if(!$blocked -or !(Test-Path -LiteralPath $protected -PathType Leaf)){throw 'Outside-obj directory was not protected'}
+          $link=Join-Path $safe 'junction'
+          if(Test-Path -LiteralPath $link){throw 'Unexpected junction already exists'}
+          New-Item -ItemType Junction -Path $link -Target $outside|Out-Null
+          try{
+            $blocked=$false
+            try{Reset-Dir (Join-Path $link 'nested')}catch{$blocked=$true}
+            if(!$blocked -or !(Test-Path -LiteralPath $protected -PathType Leaf)){throw 'Junction traversal was not protected'}
+          }finally{
+            if(Test-Path -LiteralPath $link){[IO.Directory]::Delete($link,$false)}
+          }
+          Write-Host '[WORKSPACE/GATE][RESET-GUARD][OK] exact obj-only deletion, outside and junction protected'
