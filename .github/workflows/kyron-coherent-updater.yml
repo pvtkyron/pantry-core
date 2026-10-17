@@ -1,0 +1,38 @@
+name: Kyron Coherent Updater
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Check available release, update when idle, or install a fully verified release'
+        required: true
+        type: choice
+        options: [Check, Auto, Install]
+        default: Check
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kyron-coherent-updater
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: [self-hosted, Windows, X64, kyron-laptop]
+    timeout-minutes: 35
+    steps:
+      - name: Run locally installed coherent updater
+        shell: powershell
+        env:
+          KYRON_UPDATE_MODE: ${{ inputs.mode }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:COMPUTERNAME -ine 'KYRON' -or $env:USERNAME -ine 'kyron'){throw 'Updater requires the authorized laptop session'}
+          $scriptPath='D:\kyron\etc\devtools\Sync-KyronCoherentClient.ps1'
+          if(!(Test-Path -LiteralPath $scriptPath -PathType Leaf)){throw 'Updater not yet synchronized to the laptop'}
+          $tokens=$null;$errors=$null
+          [Management.Automation.Language.Parser]::ParseFile($scriptPath,[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){throw 'Installed updater failed syntax verification'}
+          & $scriptPath -Mode $env:KYRON_UPDATE_MODE
+          if(!$?){throw 'Coherent updater failed'}

@@ -1,0 +1,1 @@
+(()=>{if(window.__REV_WAIFU_ROUTE__)return;window.__REV_WAIFU_ROUTE__=1;const s=document.currentScript,r=new URL('../',s?.src||location.href),c=window.__REV_LIVE2D_CONFIG__||(window.__REV_LIVE2D_CONFIG__={});c.homePageUrl??=new URL('index.html',r).href;c.aboutPageUrl??=new URL('about.html',r).href})();

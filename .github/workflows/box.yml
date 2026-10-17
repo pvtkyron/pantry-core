@@ -1,0 +1,84 @@
+name: Pantry Core mirror gate
+
+on:
+  workflow_call:
+    inputs:
+      capsule:
+        required: true
+        type: string
+      runtime_channel:
+        required: false
+        default: both
+        type: string
+      include_launcher:
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  publish:
+    name: Wait for canonical Pantry mirror
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Open capsule helper
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: .github/actions/private-capsule
+
+      - name: Open private delivery state
+        id: state
+        uses: ./recipe/.github/actions/private-capsule
+        with:
+          mode: open
+          key: ${{ secrets[vars.MIX_KEY_NAME] }}
+          capsule: ${{ inputs.capsule }}
+          project: workspace
+
+      - name: Publish exact Pantry revision through canonical mirror
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PANTRY_SHA: ${{ steps.state.outputs.pantry_ref }}
+        run: |
+          set -euo pipefail
+          sha="${PANTRY_SHA,,}"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::invalid Pantry delivery ref"; exit 1; }
+          dispatched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh workflow run pantry-mirror.yml -R "$GITHUB_REPOSITORY" --ref main -f pantry_sha="$sha"
+          echo "[PANTRY/PUBLISH][MIRROR/DISPATCHED] source=$sha"
+          mirror_run=''
+          deadline=$((SECONDS + 10200))
+          while (( SECONDS < deadline )); do
+            # Multiple publishers share one concurrency group; GitHub may cancel a pending
+            # mirror before another same-source run succeeds. Track all exact-source runs.
+            mirror_runs="$(gh run list -R "$GITHUB_REPOSITORY" --workflow pantry-mirror.yml --event workflow_dispatch --branch main --limit 100 --json databaseId,displayTitle,createdAt,status,conclusion)"
+            success_run="$(jq -r --arg title "Pantry mirror $sha" --arg after "$dispatched_at" '[.[] | select(.displayTitle == $title and .createdAt >= $after and .status == "completed" and .conclusion == "success")] | sort_by(.databaseId) | last | .databaseId // empty' <<<"$mirror_runs")"
+            if [[ -n "$success_run" ]]; then
+              # A successful Actions conclusion is necessary but not sufficient:
+              # the canonical Pantry main must still attest exactly this source SHA.
+              published="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq '(.commit.message | capture("(?m)^Pantry-Source: (?<sha>[0-9a-f]{40})$")?).sha // ""')"
+              [[ "$published" == "$sha" ]] || { echo "::error::Pantry mirror succeeded without the exact current published source=$sha"; exit 1; }
+              echo "[PANTRY/PUBLISH][OK] source=$sha run=$success_run"
+              exit 0
+            fi
+            latest_run="$(jq -r --arg title "Pantry mirror $sha" --arg after "$dispatched_at" '[.[] | select(.displayTitle == $title and .createdAt >= $after)] | sort_by(.databaseId) | last | .databaseId // empty' <<<"$mirror_runs")"
+            if [[ -n "$latest_run" && "$latest_run" != "$mirror_run" ]]; then
+              mirror_run="$latest_run"
+              echo "[PANTRY/PUBLISH][MIRROR/TRACKING] run=$mirror_run source=$sha"
+            fi
+            # A canceled duplicate is not proof of failure: an identical published
+            # mirror may already be queued. Keep the strict timebound and source pin.
+            sleep 10
+          done
+          echo "::error::Pantry Core mirror did not complete within 170 minutes source=$sha run=${mirror_run:-unresolved}"
+          exit 1

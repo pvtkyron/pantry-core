@@ -1,0 +1,357 @@
+name: Kyron Laptop Control
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [kyron-laptop-control]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kyron-laptop-control
+  cancel-in-progress: false
+
+jobs:
+  control:
+    name: Kyron laptop control
+    runs-on: [self-hosted, Windows, X64, kyron-laptop]
+    timeout-minutes: 60
+    steps:
+      - name: Load request without source checkout
+        id: request
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets[vars.MIX_KEY_NAME] }}
+          KYRON_WORKSPACE_REPO: ${{ secrets.MIX_REPO }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $headers=@{
+            Authorization="Bearer $env:GH_TOKEN"
+            Accept='application/vnd.github+json'
+            'X-GitHub-Api-Version'='2022-11-28'
+          }
+          if([string]::IsNullOrWhiteSpace($env:KYRON_WORKSPACE_REPO)){throw 'Workspace repository secret unavailable'}
+          $uri="$env:GITHUB_API_URL/repos/$env:KYRON_WORKSPACE_REPO/contents/.kyron/control/request.json?ref=main"
+          $payload=Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
+          if($payload.encoding-ne'base64' -or [string]::IsNullOrWhiteSpace([string]$payload.content)){throw 'request fetch returned no base64 content'}
+          $bytes=[Convert]::FromBase64String(([string]$payload.content -replace '\s',''))
+          $requestPath=Join-Path $env:RUNNER_TEMP 'kyron-control-request.json'
+          $requestText=[Text.Encoding]::UTF8.GetString($bytes)
+          [IO.File]::WriteAllText($requestPath,$requestText,(New-Object Text.UTF8Encoding($false)))
+          $req=$requestText|ConvertFrom-Json
+          $action=([string]$req.action).ToLowerInvariant()
+          if([string]::IsNullOrWhiteSpace($action)){throw 'request action missing'}
+          "action=$action" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "KYRON_REQUEST_PATH=$requestPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Restore canonical signer to laptop
+        if: ${{ steps.request.outputs.action == 'restore-canonical-signer' }}
+        shell: powershell
+        env:
+          PFX_B64: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
+          PFX_PASS: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:PFX_B64)-or[string]::IsNullOrWhiteSpace($env:PFX_PASS)){throw 'canonical signer secrets unavailable'}
+          if($env:USERNAME -ine 'kyron'){throw ('signer restore requires kyron user; current='+$env:USERDOMAIN+'\'+$env:USERNAME)}
+          $state='D:\kyron-state\Security\Signing\canonical'
+          $meta=Get-Content 'D:\kyron\security\signing\canonical-signer.json' -Raw|ConvertFrom-Json
+          $expected=([string]$meta.certificate_sha256).Trim().ToLowerInvariant()
+          $sha1=([string]$meta.thumbprint_sha1).Replace(' ','').ToUpperInvariant()
+          $raw=[Convert]::FromBase64String($env:PFX_B64)
+          $tmp=Join-Path $env:RUNNER_TEMP 'kyron-canonical-restore.pfx'
+          [IO.File]::WriteAllBytes($tmp,$raw)
+          $pass=$env:PFX_PASS.Trim()
+          $flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable -bor [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+          $cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($tmp,$pass,$flags)
+          try{
+            $actual=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($cert.RawData)).ToLowerInvariant()
+            if($actual-ne$expected){throw ('canonical signer SHA256 mismatch actual='+$actual+' expected='+$expected)}
+            if(([string]$cert.Thumbprint).Replace(' ','').ToUpperInvariant()-ne$sha1){throw 'canonical signer SHA1 mismatch'}
+            if(!$cert.HasPrivateKey){throw 'canonical signer private key missing'}
+            $backup='D:\kyron-state\Backups\Signing\canonical-'+(Get-Date -Format 'yyyyMMdd-HHmmss')
+            if(Test-Path $state){New-Item -ItemType Directory -Force -Path $backup|Out-Null;Copy-Item -LiteralPath $state -Destination $backup -Recurse -Force}
+            New-Item -ItemType Directory -Force -Path $state|Out-Null
+            Copy-Item -LiteralPath $tmp -Destination (Join-Path $state 'kyron-canonical.pfx') -Force
+            $secure=ConvertTo-SecureString -String $pass -AsPlainText -Force
+            [IO.File]::WriteAllText((Join-Path $state 'password.dpapi'),($secure|ConvertFrom-SecureString),(New-Object Text.UTF8Encoding($false)))
+            Copy-Item 'D:\kyron\security\signing\canonical-signer.json' (Join-Path $state 'public-metadata.json') -Force
+            $testSecure=ConvertTo-SecureString ([IO.File]::ReadAllText((Join-Path $state 'password.dpapi')))
+            $testCred=[Management.Automation.PSCredential]::new('kyron',$testSecure)
+            $testPass=$testCred.GetNetworkCredential().Password
+            $check=[Security.Cryptography.X509Certificates.X509Certificate2]::new((Join-Path $state 'kyron-canonical.pfx'),$testPass,[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
+            try{if(!$check.HasPrivateKey-or(([string]$check.Thumbprint).Replace(' ','').ToUpperInvariant()-ne$sha1)){throw 'local PFX/DPAPI verification failed'}}finally{$check.Dispose()}
+            $mt=Join-Path $state 'mt-manager';New-Item -ItemType Directory -Force -Path $mt|Out-Null
+            $rnd=New-Object byte[] 24;[Security.Cryptography.RandomNumberGenerator]::Fill($rnd);$mtPass=[Convert]::ToHexString($rnd).ToLowerInvariant();[Security.Cryptography.CryptographicOperations]::ZeroMemory($rnd)
+            $p12=Join-Path $mt 'kyron-canonical.p12'
+            $p12Bytes=$cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Pkcs12,$mtPass)
+            try{[IO.File]::WriteAllBytes($p12,$p12Bytes)}finally{[Security.Cryptography.CryptographicOperations]::ZeroMemory($p12Bytes)}
+            $keytool='D:\kyron-sdk\Java\17.0.20\bin\keytool.exe';if(!(Test-Path $keytool)){throw 'keytool unavailable'}
+            $jks=Join-Path $mt 'kyron-canonical.jks';Remove-Item $jks -Force -ErrorAction SilentlyContinue
+            & $keytool -importkeystore -srckeystore $p12 -srcstoretype PKCS12 -srcstorepass $mtPass -destkeystore $jks -deststoretype JKS -deststorepass $mtPass -destkeypass $mtPass -noprompt|Out-Null
+            if($LASTEXITCODE){throw ('JKS conversion failed rc='+$LASTEXITCODE)}
+            [IO.File]::WriteAllText((Join-Path $mt 'mt-manager-password.txt'),($mtPass+[Environment]::NewLine),(New-Object Text.UTF8Encoding($false)))
+            $manifest=[ordered]@{schema=1;certificate_sha256=$expected;thumbprint_sha1=$sha1;restored_at_utc=[DateTime]::UtcNow.ToString('o');pfx=(Join-Path $state 'kyron-canonical.pfx');p12=$p12;jks=$jks;password_file=(Join-Path $mt 'mt-manager-password.txt');github_backup='KYRON_CODESIGN_PFX_B64 + KYRON_CODESIGN_PASSWORD'}
+            [IO.File]::WriteAllText((Join-Path $state 'recovery-manifest.json'),($manifest|ConvertTo-Json -Depth 3),(New-Object Text.UTF8Encoding($false)))
+            & icacls.exe $state '/inheritance:r'|Out-Null
+            & icacls.exe $state '/grant:r' 'KYRON\kyron:(OI)(CI)F' 'SYSTEM:(OI)(CI)F'|Out-Null
+            Write-Host ('[KYRON/SIGNING/RESTORE][OK] cert='+$expected+' jks='+$jks+' p12='+$p12)
+          }finally{
+            if($cert){$cert.Dispose()}
+            if(Test-Path $tmp){Remove-Item $tmp -Force -ErrorAction SilentlyContinue}
+            if($raw){[Security.Cryptography.CryptographicOperations]::ZeroMemory($raw)}
+            $pass=$null;$testPass=$null;$mtPass=$null
+          }
+
+      - name: Execute bounded control action
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $req=Get-Content $env:KYRON_REQUEST_PATH -Raw -Encoding UTF8 | ConvertFrom-Json
+          if([int]$req.v-ne1){throw 'unsupported request schema'}
+          if([string]::IsNullOrWhiteSpace([string]$req.id)){throw 'missing request id'}
+          if($req.target -and $req.target-ne'*' -and $req.target-ne$env:COMPUTERNAME){throw "wrong target: $($req.target)"}
+          $action=([string]$req.action).ToLowerInvariant()
+          Write-Host "[KYRON/CONTROL][START] id=$($req.id) action=$action host=$env:COMPUTERNAME"
+          switch($action){
+            'health' {
+              $os=Get-CimInstance Win32_OperatingSystem
+              $drive=Get-PSDrive -Name D
+              $tasks=Get-ScheduledTask | Where-Object TaskName -Like 'Kyron*' | Select-Object TaskName,State
+              [ordered]@{host=$env:COMPUTERNAME;user=$env:USERNAME;uptime_s=[int]((Get-Date)-$os.LastBootUpTime).TotalSeconds;free_mem_mb=[int]($os.FreePhysicalMemory/1024);d_free_gb=[math]::Round($drive.Free/1GB,2);tasks=$tasks}|ConvertTo-Json -Depth 4 -Compress|Write-Host
+            }
+            'git-status' {
+              & git -C 'D:\kyron' status --short --branch
+              if($LASTEXITCODE){throw "git status failed rc=$LASTEXITCODE"}
+            }
+            'notify' {
+              $kind=if($req.kind -in @('Info','Success','Warning','Error')){[string]$req.kind}else{'Info'}
+              $msg=[string]$req.message;if([string]::IsNullOrWhiteSpace($msg)){throw 'message is empty'}
+              & 'D:\kyron\Tools\Notify-KyronAgent.ps1' -Title 'Kyron • GitHub' -Message $msg -Kind $kind
+            }
+            'restart-client' {
+              Stop-ScheduledTask -TaskName 'KyronClientUser' -ErrorAction SilentlyContinue
+              Start-ScheduledTask -TaskName 'KyronClientUser'
+              Get-ScheduledTask -TaskName 'KyronClientUser' | Select-Object TaskName,State | Format-Table -AutoSize
+            }
+            'audit-workspace' {
+              & 'D:\kyron\AUDIT_WORKSPACE.bat'
+              if($LASTEXITCODE){throw "workspace audit failed rc=$LASTEXITCODE"}
+            }
+            'build-workspace' {
+              & 'D:\kyron\BUILD_ALL.bat'
+              if($LASTEXITCODE){throw "workspace build failed rc=$LASTEXITCODE"}
+            }
+            'kyron-tasks' {
+              Get-ScheduledTask | Where-Object TaskName -Like 'Kyron*' | Select-Object TaskName,State,@{n='User';e={$_.Principal.UserId}} | Format-Table -AutoSize
+            }
+            'proxy-inspect' {
+              $root='D:\kyron'
+              $proxy=Join-Path $root 'jni\windows\Launcher\runtime\client\managed\KyronControl.Services\ProxyEngineService.cs'
+              $sources=Join-Path $root 'jni\windows\Launcher\runtime\client\managed\config\proxy-sources.json'
+              $runner=Join-Path $root '.tmp\ProxyRefreshRunner\Program.cs'
+              Write-Host '[KYRON/PROXY][IDENTITY]'
+              [ordered]@{host=$env:COMPUTERNAME;user=$env:USERNAME;proxyFile=(Get-Item $proxy).LastWriteTimeUtc;proxyBytes=(Get-Item $proxy).Length}|ConvertTo-Json -Compress|Write-Host
+              Write-Host '[KYRON/PROXY][VERIFIER-SNIPPETS]'
+              Select-String -LiteralPath $proxy -Pattern 'discord|keyauth|service reach|ProbeStatus|HealthTargets|ReconcileRoutingAsync' -Context 1,1 | ForEach-Object { $_.ToString() } | Write-Host
+              Write-Host '[KYRON/PROXY][SOURCES]'
+              $src=Get-Content $sources -Raw -Encoding UTF8|ConvertFrom-Json
+              $src|Select-Object Name,Tag,Limit,Trust|ConvertTo-Json -Depth 3 -Compress|Write-Host
+              Write-Host '[KYRON/PROXY][STATE]'
+              $state='C:\ProgramData\Kyron\KyronControl'
+              $cachePath=Join-Path $state 'proxy-verified-cache.json'
+              if(Test-Path $cachePath){
+                $cache=Get-Content $cachePath -Raw -Encoding UTF8|ConvertFrom-Json
+                $protocols=@($cache|Group-Object Protocol|ForEach-Object{"$($_.Name):$($_.Count)"})
+                $engines=@($cache|Group-Object VerifiedEngine|ForEach-Object{"$($_.Name):$($_.Count)"})
+                $sourceNames=@($cache|Group-Object Source|Sort-Object Count -Descending|ForEach-Object{"$($_.Name):$($_.Count)"})
+                [ordered]@{verified=@($cache).Count;protocols=$protocols;engines=$engines;sources=$sourceNames}|ConvertTo-Json -Depth 4 -Compress|Write-Host
+              }
+              $sel=Join-Path $state 'selective-proxy.json'
+              if(Test-Path $sel){Get-Content $sel -Raw -Encoding UTF8|Write-Host}
+              $engine=Join-Path $state 'proxy-engine.txt';if(Test-Path $engine){Write-Host ('ENGINE='+((Get-Content $engine -Raw).Trim()))}
+              $active=Join-Path $state 'proxy-active.json'
+              if(Test-Path $active){
+                $a=Get-Content $active -Raw -Encoding UTF8|ConvertFrom-Json
+                $outs=@($a.outbounds|ForEach-Object{"$($_.tag):$($_.type)"})
+                $ins=@($a.inbounds|ForEach-Object{"$($_.tag):$($_.type):$($_.listen_port)"})
+                [ordered]@{outbounds=$outs;inbounds=$ins}|ConvertTo-Json -Compress|Write-Host
+              }
+              try{
+                $reg=Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
+                [ordered]@{ProxyEnable=$reg.ProxyEnable;ProxyServer=$reg.ProxyServer;ProxyOverride=$reg.ProxyOverride}|ConvertTo-Json -Compress|Write-Host
+              }catch{Write-Host ('REGERR='+$_.Exception.Message)}
+              Get-Service -Name 'KyronCore' -ErrorAction SilentlyContinue | Select-Object Name,Status,StartType | ConvertTo-Json -Compress | Write-Host
+              Get-Process -Name 'sing-box','xray','Discord' -ErrorAction SilentlyContinue | Select-Object ProcessName,Id,Path | ConvertTo-Json -Compress | Write-Host
+              if(Test-Path $runner){
+                Write-Host '[KYRON/PROXY][RUNNER]'
+                Select-String -LiteralPath $runner -Pattern 'RefreshAsync|ConnectFastestAsync|EnableTunAsync|SetLocalProxyModeAsync|KYRON_VERIFY' -Context 1,1 | ForEach-Object { $_.ToString() } | Write-Host
+              }
+              & git -C $root status --short -- 'jni/windows/Launcher/runtime/client/managed/KyronControl.Services/ProxyEngineService.cs' 'jni/windows/Launcher/runtime/client/managed/config/proxy-sources.json' 'jni/windows/Launcher/runtime/core/managed/KyronControl.Core/TunSupervisor.cs'
+            }
+            'proxy-connect-discord' {
+              $root='D:\kyron'
+              $sourcePath=Join-Path $root 'jni\windows\Launcher\runtime\client\managed\config\proxy-sources.json'
+              $backupDir=Join-Path $root ('.tmp\proxy-source-backup-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
+              New-Item -ItemType Directory -Path $backupDir -Force|Out-Null
+              Copy-Item $sourcePath (Join-Path $backupDir 'proxy-sources.json') -Force
+              $src=@(Get-Content $sourcePath -Raw -Encoding UTF8|ConvertFrom-Json)
+              $adds=@(
+                [pscustomobject]@{Tag='matin-super';Url='ghraw://MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/super-sub.txt';Name='Matin Super Tested';Limit=220;Trust=99},
+                [pscustomobject]@{Tag='alirewa-top';Url='ghraw://Alirewa/V2ray-Configs/main/sub1.txt';Name='Alirewa Telegram+GitHub Top100';Limit=100;Trust=98},
+                [pscustomobject]@{Tag='anon-xhttp';Url='ghraw://anonymouskeys/Free-configs-/main/output/transport/xhttp.txt';Name='AnonymousKeys XHTTP';Limit=180;Trust=97},
+                [pscustomobject]@{Tag='ebrasha-global';Url='ghraw://ebrasha/free-v2ray-public-list/refs/heads/main/V2Ray-Config-By-EbraSha-All-Type.txt';Name='EbraSha Fresh Multi-Protocol';Limit=220;Trust=95},
+                [pscustomobject]@{Tag='tg-v2ray-free-conf';Url='https://t.me/s/v2ray_free_conf';Name='Telegram v2ray_free_conf';Limit=180;Trust=93},
+                [pscustomobject]@{Tag='tg-filembad';Url='https://t.me/s/filembad';Name='Telegram filembad';Limit=180;Trust=92}
+              )
+              foreach($a in $adds){
+                if(-not @($src|Where-Object{$_.Tag-eq$a.Tag -or $_.Url-eq$a.Url}).Count){
+                  $src+=$a
+                  Write-Host "[KYRON/PROXY][SOURCE+] $($a.Name)"
+                }
+              }
+              $utf8=New-Object System.Text.UTF8Encoding($false)
+              [IO.File]::WriteAllText($sourcePath,($src|ConvertTo-Json -Depth 8),$utf8)
+
+              $runner=Join-Path $root '.tmp\DiscordConnectRunner'
+              New-Item -ItemType Directory -Path $runner -Force|Out-Null
+              $proj=@'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <OutputType>Exe</OutputType>
+              <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+              <EnableWindowsTargeting>true</EnableWindowsTargeting>
+              <Nullable>enable</Nullable>
+              <ImplicitUsings>enable</ImplicitUsings>
+            </PropertyGroup>
+            <ItemGroup>
+              <ProjectReference Include="..\..\jni\windows\Launcher\runtime\client\managed\KyronLauncherRuntime.csproj" />
+            </ItemGroup>
+          </Project>
+          '@
+              [IO.File]::WriteAllText((Join-Path $runner 'DiscordConnectRunner.csproj'),$proj,$utf8)
+              $program=@'
+          using System.Net;
+          using System.Net.Http;
+          using System.Net.WebSockets;
+          using System.Text;
+          using KyronControl.Services;
+          
+          Environment.SetEnvironmentVariable("KYRON_PROXY_NO_AUTOSTART","1");
+          Environment.SetEnvironmentVariable("KYRON_VERIFY_SINGBOX_ONLY","1");
+          using var overall=new CancellationTokenSource(TimeSpan.FromMinutes(45));
+          var token=overall.Token;
+          var selectivePath=@"C:\ProgramData\Kyron\KyronControl\selective-proxy.json";
+          if(!File.Exists(selectivePath)) throw new InvalidOperationException("selective-proxy.json missing");
+          var selective=File.ReadAllText(selectivePath);
+          if(!selective.Contains("Discord.exe",StringComparison.OrdinalIgnoreCase) ||
+             !selective.Contains("discord.com",StringComparison.OrdinalIgnoreCase) ||
+             !selective.Contains("keyauth.win",StringComparison.OrdinalIgnoreCase))
+              throw new InvalidOperationException("Discord/KeyAuth selective routing rules are missing");
+          
+          static async Task<(bool Ok,int Status,string Error)> HttpProbe(string url,CancellationToken token)
+          {
+              try
+              {
+                  using var handler=new SocketsHttpHandler
+                  {
+                      Proxy=new WebProxy("http://127.0.0.1:10809"),
+                      UseProxy=true,
+                      AllowAutoRedirect=true,
+                      ConnectTimeout=TimeSpan.FromSeconds(5)
+                  };
+                  using var http=new HttpClient(handler){Timeout=TimeSpan.FromSeconds(9)};
+                  using var response=await http.GetAsync(url,HttpCompletionOption.ResponseHeadersRead,token);
+                  int status=(int)response.StatusCode;
+                  return(status>=200&&status<500,status,"");
+              }
+              catch(Exception ex){return(false,0,ex.Message);}
+          }
+          static async Task<(bool Ok,string Detail)> DiscordGatewayProbe(CancellationToken token)
+          {
+              try
+              {
+                  using var ws=new ClientWebSocket();
+                  ws.Options.Proxy=new WebProxy("http://127.0.0.1:10809");
+                  using var timeout=CancellationTokenSource.CreateLinkedTokenSource(token);
+                  timeout.CancelAfter(TimeSpan.FromSeconds(10));
+                  await ws.ConnectAsync(new Uri("wss://gateway.discord.gg/?v=10&encoding=json"),timeout.Token);
+                  var buffer=new byte[4096];
+                  var result=await ws.ReceiveAsync(buffer,timeout.Token);
+                  string payload=Encoding.UTF8.GetString(buffer,0,result.Count);
+                  bool hello=payload.Contains("\"op\":10",StringComparison.Ordinal) || payload.Contains("\"op\": 10",StringComparison.Ordinal);
+                  try{await ws.CloseAsync(WebSocketCloseStatus.NormalClosure,"probe complete",CancellationToken.None);}catch{}
+                  return(hello,"state="+ws.State+" hello="+hello+" payload="+payload.Substring(0,Math.Min(payload.Length,180)));
+              }
+              catch(Exception ex){return(false,ex.Message);}
+          }
+          
+          using var proxy=new ProxyEngineService();
+          var progress=new Progress<string>(s=>Console.WriteLine("[REFRESH] "+s));
+          Console.WriteLine("[KYRON/RUNNER] deep refresh, sing-box verification only");
+          Console.WriteLine("[REFRESH_RESULT] "+await proxy.RefreshAsync(progress,token,deep:true));
+          var candidates=proxy.Nodes
+              .Where(x=>x.ProxyVerified &&
+                        x.VerifiedEngine.Equals("sing-box",StringComparison.OrdinalIgnoreCase) &&
+                        !x.Country.Equals("IR",StringComparison.OrdinalIgnoreCase))
+              .OrderByDescending(x=>x.DownloadMbps)
+              .ThenBy(x=>x.ProxyMs)
+              .ThenByDescending(x=>x.SourceTrust)
+              .Take(24)
+              .ToArray();
+          Console.WriteLine($"[CANDIDATES] {candidates.Length}");
+          ProxyNode? winner=null;
+          foreach(var node in candidates)
+          {
+              token.ThrowIfCancellationRequested();
+              Console.WriteLine($"[TRY] {node.Display} src={node.Source} speed={node.DownloadMbps:0.0}Mbps");
+              string connected=await proxy.ConnectAsync(node,token);
+              Console.WriteLine("[CONNECT] "+connected.Replace(Environment.NewLine," | "));
+              if(!connected.TrimStart().StartsWith("✓",StringComparison.Ordinal)) continue;
+          
+              var discord=await HttpProbe("https://discord.com/api/v10/gateway",token);
+              var keyauth=await HttpProbe("https://keyauth.win/api/1.3/",token);
+              var gateway=await DiscordGatewayProbe(token);
+              Console.WriteLine($"[TARGETS] discord={discord.Ok}/{discord.Status} keyauth={keyauth.Ok}/{keyauth.Status} gateway={gateway.Ok} detail={gateway.Detail}");
+              if(discord.Ok && keyauth.Ok && gateway.Ok){winner=node;break;}
+          }
+          if(winner is null)
+          {
+              try{Console.WriteLine("[FAILOPEN] "+await proxy.DirectAsync(CancellationToken.None));}catch{}
+              throw new InvalidOperationException("No verified sing-box node passed Discord API + Discord Gateway WebSocket + KeyAuth API");
+          }
+          Console.WriteLine("[WINNER] "+winner.Display+" source="+winner.Source);
+          Console.WriteLine("[TUN] "+await proxy.EnableTunAsync(token));
+          if(!proxy.TunHealthy) throw new InvalidOperationException("TUN did not become healthy");
+          var connectivity=new ConnectivityService();
+          Console.WriteLine("[SYSTEM_PROXY] "+await connectivity.EnforceKyronProxyLockAsync(token));
+          var d2=await HttpProbe("https://discord.com/api/v10/gateway",token);
+          var k2=await HttpProbe("https://keyauth.win/api/1.3/",token);
+          var g2=await DiscordGatewayProbe(token);
+          Console.WriteLine($"[FINAL_TARGETS] discord={d2.Ok}/{d2.Status} keyauth={k2.Ok}/{k2.Status} gateway={g2.Ok}");
+          Console.WriteLine($"[FINAL] engine=sing-box tunEnabled={proxy.TunEnabled} tunHealthy={proxy.TunHealthy} systemProxy={connectivity.CurrentSystemProxy}");
+          if(!(d2.Ok&&k2.Ok&&g2.Ok)) throw new InvalidOperationException("final target recheck failed");
+          '@
+              [IO.File]::WriteAllText((Join-Path $runner 'Program.cs'),$program,$utf8)
+              & dotnet run --project (Join-Path $runner 'DiscordConnectRunner.csproj') -c Release --nologo
+              if($LASTEXITCODE){throw "DiscordConnectRunner failed rc=$LASTEXITCODE"}
+
+              $state='C:\ProgramData\Kyron\KyronControl'
+              $reg=Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
+              [ordered]@{
+                ProxyEnable=$reg.ProxyEnable
+                ProxyServer=$reg.ProxyServer
+                Engine=if(Test-Path (Join-Path $state 'proxy-engine.txt')){(Get-Content (Join-Path $state 'proxy-engine.txt') -Raw).Trim()}else{''}
+                TunFlag=Test-Path (Join-Path $state 'tun-enabled.flag')
+              }|ConvertTo-Json -Compress|Write-Host
+            }
+            'restore-canonical-signer' {
+              $manifest='D:\kyron-state\Security\Signing\canonical\recovery-manifest.json'
+              if(!(Test-Path $manifest)){throw 'signer recovery manifest missing'}
+              $m=Get-Content $manifest -Raw|ConvertFrom-Json
+              Write-Host ('[KYRON/SIGNING/RESTORE][VERIFIED] cert='+$m.certificate_sha256+' jks='+$m.jks)
+            }
+            default { throw "action not allowed: $action" }
+          }
+          Write-Host "[KYRON/CONTROL][OK] id=$($req.id) action=$action"

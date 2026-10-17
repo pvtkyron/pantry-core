@@ -1,0 +1,191 @@
+name: Workspace PowerShell regression gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/workspace-powershell-regression.yml'
+      - '.github/workflows/workspace-handoff.ps1'
+      - '.github/tests/test_workspace_handoff.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kyron-workspace-powershell-gate
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Private Workspace PowerShell contracts
+    runs-on: windows-2025
+    timeout-minutes: 18
+    steps:
+      - name: Enable Git long paths before checkout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & git config --global core.longpaths true
+          if($LASTEXITCODE-ne0){throw 'Git long path configuration failed'}
+          Write-Host '[WORKSPACE/GATE][GIT-PATHS][OK]'
+      - name: Check out pinned handoff regression recipe
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+          sparse-checkout: |
+            /.github/workflows/workspace-handoff.ps1
+            /.github/tests/test_workspace_handoff.py
+          sparse-checkout-cone-mode: false
+      - name: Mask private checkout identity
+        shell: pwsh
+        env:
+          WORKSPACE_REPO: ${{ secrets.MIX_REPO }}
+        run: |
+          if([string]::IsNullOrWhiteSpace($env:WORKSPACE_REPO)){throw 'Private source configuration unavailable'}
+          Write-Host "::add-mask::$env:WORKSPACE_REPO"
+      - name: Check out private Workspace sources
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: workspace
+          fetch-depth: 1
+          fetch-tags: false
+          lfs: false
+          persist-credentials: false
+          show-progress: false
+      - name: Check private source Action ownership
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          # Match the reviewed Workspace control-action policy in source-pin.yml.
+          $allowedWorkspaceActions=@{'check-kyron-updater.yml'='772490e0a34b217ccdfb680535aeca8f26c6f265'}
+          $dir=Join-Path $PWD.Path 'workspace/.github/workflows'
+          if(Test-Path -LiteralPath $dir -PathType Container){
+            $actions=@(Get-ChildItem -LiteralPath $dir -File | Where-Object {$_.Extension -in '.yml','.yaml'})
+            foreach($file in $actions){
+              $expected=[string]$allowedWorkspaceActions[$file.Name]
+              if([string]::IsNullOrWhiteSpace($expected)){throw 'Private source unaudited Action rejected'}
+              $relative=".github/workflows/$($file.Name)"
+              # The Git blob pin survives checkout-only CRLF conversion.
+              $actual=(& git -C workspace rev-parse --verify "HEAD:$relative" 2>$null).Trim().ToLowerInvariant()
+              if($LASTEXITCODE-ne0-or$actual-ne$expected){throw 'Private source audited Action drift rejected'}
+            }
+            if($actions.Count-ne$allowedWorkspaceActions.Count){throw 'Private source audited Action set rejected'}
+          }
+          Write-Host '[WORKSPACE/GATE][ACTIONS][OK]'
+      - name: Run PowerShell safety preflight
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Push-Location 'workspace'
+          try{
+            $ps=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+            & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File 'etc/build/assert-powershell-safety.ps1' -Root $PWD.Path
+            if($LASTEXITCODE){throw 'PowerShell source safety rejected'}
+            Write-Host '[WORKSPACE/GATE][SOURCE][OK]'
+          }finally{Pop-Location}
+      - name: Run PowerShell regression contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Push-Location 'workspace'
+          try{
+            $ps=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+            & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File 'etc/build/test-powershell-safety.ps1'
+            if($LASTEXITCODE){throw 'PowerShell regression contracts rejected'}
+            Write-Host '[WORKSPACE/GATE][REGRESSION][OK]'
+          }finally{Pop-Location}
+      - name: Verify bounded native compiler, cache and failure handling
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $legacy=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+          $tool=Get-Command clang++.exe -CommandType Application -ErrorAction SilentlyContinue|Select-Object -First 1
+          $compiler=if($env:CXX_PATH){$env:CXX_PATH}elseif($tool){$tool.Source}else{Join-Path $env:ProgramFiles 'LLVM/bin/clang++.exe'}
+          if(!(Test-Path -LiteralPath $compiler -PathType Leaf)){throw 'Windows clang++ unavailable for bounded compiler regression'}
+          $env:CXX_PATH=[IO.Path]::GetFullPath($compiler)
+          $test=Join-Path $PWD.Path 'workspace/etc/devtools/tests/Test-BoundedNativeCompile.ps1'
+          Write-Host '[WORKSPACE/GATE][SHELL] Windows PowerShell 5.1'
+          & $legacy -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -CompilerPath $env:CXX_PATH
+          if($LASTEXITCODE-ne0){throw "PowerShell 5.1 bounded compiler regression rejected rc=$LASTEXITCODE"}
+          Write-Host '[WORKSPACE/GATE][NATIVE-COMPILE][OK] maintained real-process regression passed'
+
+      - name: Verify obj-only cleanup guard
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $Root=Join-Path $PWD.Path 'workspace'
+          $scriptPath=Join-Path $Root 'etc/devtools/BuildWindowsLlvm.ps1'
+          $tokens=$null;$parseErrors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($scriptPath,[ref]$tokens,[ref]$parseErrors)
+          if(@($parseErrors).Count){throw "LLVM source parser failed: $($parseErrors[0].Message)"}
+          $found=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Reset-Dir'},$true))
+          if($found.Count -ne 1){throw 'Guarded Reset-Dir implementation missing'}
+          $resetSource=$found[0].Extent.Text
+          if($resetSource -notmatch '(?i)\bthrow\b' -or $resetSource -notmatch 'ReparsePoint' -or $resetSource -notmatch '(?i)obj' -or $resetSource -notmatch 'EnumerateFileSystemEntries'){throw 'Reset-Dir lacks owned-obj and recursive reparse guards; refusing destructive probe'}
+          . ([scriptblock]::Create($found[0].Extent.Text))
+          $safe=Join-Path $Root ('Launcher/obj/__KyronResetGuard_'+$env:GITHUB_RUN_ID)
+          New-Item -ItemType Directory -Path $safe -Force|Out-Null
+          $marker=Join-Path $safe 'marker.txt';[IO.File]::WriteAllText($marker,'owned-fixture')
+          Reset-Dir $safe
+          if(Test-Path -LiteralPath $marker){throw 'Owned obj directory was not reset'}
+          $outside=Join-Path $env:RUNNER_TEMP ('KyronResetGuardOutside_'+$env:GITHUB_RUN_ID)
+          New-Item -ItemType Directory -Path $outside -Force|Out-Null
+          $protected=Join-Path $outside 'must-survive.txt';[IO.File]::WriteAllText($protected,'protected')
+          $blocked=$false
+          try{Reset-Dir $outside}catch{$blocked=$true}
+          if(!$blocked -or !(Test-Path -LiteralPath $protected -PathType Leaf)){throw 'Outside-obj directory was not protected'}
+          $link=Join-Path $safe 'junction'
+          if(Test-Path -LiteralPath $link){throw 'Unexpected junction already exists'}
+          New-Item -ItemType Junction -Path $link -Target $outside|Out-Null
+          try{
+            $blocked=$false
+            try{Reset-Dir (Join-Path $link 'nested')}catch{$blocked=$true}
+            if(!$blocked -or !(Test-Path -LiteralPath $protected -PathType Leaf)){throw 'Junction traversal was not protected'}
+          }finally{
+            if(Test-Path -LiteralPath $link){[IO.Directory]::Delete($link,$false)}
+          }
+          $nested=Join-Path $safe 'nested'
+          New-Item -ItemType Directory -Path $nested -Force|Out-Null
+          $embedded=Join-Path $nested 'junction'
+          New-Item -ItemType Junction -Path $embedded -Target $outside|Out-Null
+          try{
+            $blocked=$false
+            try{Reset-Dir $safe}catch{$blocked=$true}
+            if(!$blocked -or !(Test-Path -LiteralPath $protected -PathType Leaf)){throw 'Nested ReparsePoint inside owned obj tree was not protected'}
+          }finally{
+            if(Test-Path -LiteralPath $embedded){[IO.Directory]::Delete($embedded,$false)}
+          }
+          Write-Host '[WORKSPACE/GATE][RESET-GUARD][OK] exact obj-only deletion, outside, ancestor and nested junction protected'
+
+      - name: Test PowerShell handoff crypto across Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $ps=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+          $env:KYRON_TEST_PWSH=$ps
+          python -m pip install --disable-pip-version-check --no-input 'cryptography==46.0.4'
+          if($LASTEXITCODE-ne0){throw 'PowerShell handoff regression dependency installation failed'}
+          python 'recipe/.github/tests/test_workspace_handoff.py' -v
+          if($LASTEXITCODE-ne0){throw 'PowerShell handoff crypto regression rejected'}
+
+      - name: Set pinned Java for recovered source regressions
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17.0.20+8'
+
+      - name: Verify recovered Kyron Link Java branches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python -B -m unittest discover -s workspace/KyronLink/tests -v
+          if($LASTEXITCODE-ne0){throw 'Recovered Java source regressions rejected'}
