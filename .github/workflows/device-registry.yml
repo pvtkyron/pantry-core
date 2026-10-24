@@ -1,0 +1,137 @@
+name: Device registry synchronization
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [device-enrollment]
+  schedule:
+    - cron: '*/5 * * * *'
+  push:
+    branches: [main]
+    paths: ['.github/workflows/device-registry.yml']
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: device-registry-synchronization
+  cancel-in-progress: false
+
+jobs:
+  windows_proof:
+    if: github.repository == 'pvtkyron/pantry-core' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Enable Git long paths before Windows checkout
+        shell: pwsh
+        run: |
+          git config --global core.longpaths true
+          if($LASTEXITCODE -ne 0){throw 'Git long path configuration failed'}
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: workspace
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Verify real Windows CNG enrollment proof
+        shell: pwsh
+        run: |
+          node --test workspace/etc/DeviceEnrollmentWorker/interop.test.mjs
+          if($LASTEXITCODE -ne 0){throw 'Windows CNG enrollment proof failed'}
+
+  synchronize:
+    if: github.repository == 'pvtkyron/pantry-core'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Open canonical producer
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: workspace
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+      - name: Open private records
+        uses: actions/checkout@v6
+        with:
+          repository: pvtkyron/cdn
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: cdn
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: true
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Test and compile the current records
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test workspace/etc/DeviceEnrollmentWorker/build-pantry-index.test.mjs
+          node workspace/etc/DeviceEnrollmentWorker/build-pantry-index.mjs --checkout "$PWD/cdn" "$PWD/workspace/Distribution"
+      - name: Save only current decoded records and anonymous publisher inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for project in cdn workspace; do
+            git -C "$project" config user.name 'Kyron Device Registry'
+            git -C "$project" config user.email 'kyron-device-registry@users.noreply.github.com'
+            git -C "$project" diff --cached --quiet || { echo 'Unexpected pre-staged changes'; exit 1; }
+          done
+          git -C cdn add -- users-decoded
+          if ! git -C cdn diff --cached --quiet; then
+            git -C cdn commit -m 'device: refresh current decoded registry' -m 'Agent: kyron-device-registry' -m 'Model: automation'
+            git -C cdn push origin HEAD:refs/heads/main
+          fi
+          git -C workspace add -- Distribution/enrollment/membership.json.gz Distribution/enrollment/receipt.json
+          if ! git -C workspace diff --cached --quiet; then
+            git -C workspace commit -m 'device: refresh anonymous Pantry membership [control-state]' -m 'Agent: kyron-device-registry' -m 'Model: automation'
+            git -C workspace push origin HEAD:refs/heads/main
+          fi
+          # Pantry's existing watcher and signed publisher own promotion.
+          # Never push opaque records, signing material or readable user data here.
+
+  prune_previous_runs:
+    if: always() && github.repository == 'pvtkyron/pantry-core'
+    needs: synchronize
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Remove completed previous registry runs
+        shell: python
+        env:
+          REGISTRY_ACTION_TOKEN: ${{ github.token }}
+        run: |
+          import json, os, urllib.request
+          repository=os.environ['GITHUB_REPOSITORY']
+          if repository!='pvtkyron/pantry-core': raise SystemExit('Repository guard failed')
+          base=f'https://api.github.com/repos/{repository}'
+          headers={'Authorization':'Bearer '+os.environ['REGISTRY_ACTION_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'}
+          def api(path,method='GET'):
+              request=urllib.request.Request(base+path,headers=headers,method=method)
+              with urllib.request.urlopen(request,timeout=25) as response:
+                  data=response.read()
+                  return json.loads(data) if data else None
+          previous=[]
+          for page in range(1,101):
+              runs=api(f'/actions/workflows/device-registry.yml/runs?per_page=100&page={page}')['workflow_runs']
+              previous.extend(int(r['id']) for r in runs if r['status']=='completed' and int(r['id'])!=int(os.environ['GITHUB_RUN_ID']))
+              if len(runs)<100: break
+          else: raise SystemExit('Run pagination limit exceeded')
+          for run_id in previous: api(f'/actions/runs/{run_id}','DELETE')
+          print(f'Removed {len(previous)} completed previous registry runs; no artifacts are uploaded.')

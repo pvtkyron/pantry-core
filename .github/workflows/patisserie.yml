@@ -1,0 +1,108 @@
+# 2026-10-17 reviewed PowerShell safety repair: Workspace f7d8f9d replaces reserved updater args assignment; keep strict Doctor and signed publish gates.
+# 2026-10-17 taskbar HUD signed release: Workspace 7688848a495ee93e6a7322f1f420a9ab9e719c51 UI-only transparent taskbar strip; retain all immutable source, signer, verification and publish gates.
+# 2026-10-17 signed full-release source pin: Workspace d3c0d509 canonical signer-identity manifest matches generated deterministic bytes on both OSes; preserve strict provenance, immutable source key and signer gate. Standalone final verified delivery and Bootstrap acceptance.
+# 2026-10-16 signed full-release retry: pin Workspace c09ef2ed portable signer-identity and Tunnel PAC/cutover fixes; strict immutable source/output attestation preserved.
+# 2026-10-16 release retry: Workspace 82cf730ef6e56ce20d4cecb432131c95ec7c0ee5 preserves frozen signer manifest across nested RequireExistingIdentity build, keeping strict Launcher input audit intact.
+# 2026-10-16 targeted retry: source-pinned Workspace 9e67b909 index coverage gate; rebuild all required signed opaque records before Pantry publish.
+# 2026-10-16 pinned source receipt repair: Workspace 8fd87e927ae13f13bcafc588bb55a3d31f4004d2; reconstruct only SHA+size-verified upstream tool metadata before Pantry promotion.
+# 2026-10-16 signed release retry: immutable integrated Distribution source and 18-path Launcher provenance synchronized at Workspace 8587c685; no artifact trust bypass.
+# 2026-10-16 headless regression retry: pin Workspace 89cdc1d and re-run complete verified pipeline after relocating KyronTest.hpp include directories.
+# 2026-10-16 release retry: use Workspace StageLauncherForPantry canonical source-root fix c2a71578, retaining strict signed build and Pantry promotion gates.
+# 2026-10-15 release retry: signed native attestations in delivery allowlist and canonical Shared NDK paths.
+# 2026-10-15: full signed release retry after canonical Android host-tool path and WindowsOnly toolchain repairs.
+# Reconcile current signed runtime and client after startup dependency repair.
+# Source-graph ownership and Windows PowerShell contracts verified in run 38092337118.
+# Canonical reconcile after the private Workspace PowerShell regression gate passed.
+# 2026-10-13 signed 4.6 recovery: reconcile Runtime and Launcher atomically after standalone Launcher provenance rejected mixed 4.6/4.7 receipts.
+# Retry after hosted Lib and Java/D8 failed reaching Google's pinned NDK r28 archive; Workspace now resumes downloads and verifies the original locked size/SHA1.
+# Retry after dual-lane build and Doctor portable passed; Windows powershell-safety reserved Matches assignment fixed at Workspace main 84e3db57.
+# snapshot-generation-acceptance-20261013: build native + Launcher from canonical signed mains and validate post-publish.
+# 2026-10-13 signer path repair: rebuilt after relocating canonical Windows signer validation to Tools/AndroidSigning.
+# 2026-10-13 managed toolchain repair: trigger signed full release after removing retired KyronVM helper paths.
+# 2026-10-13 managed-root regression: normalize Windows path separators and rerun signed hosted release.
+name: Kyron Full Release · 6h
+run-name: "Kyron full release · native + launcher + doctor · ${{ github.run_id }}"
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [workspace-release]
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patisserie.yml'
+      - '.github/workflows/source-pin.yml'
+      - '.github/workflows/project-workspace.yml'
+      - '.github/workflows/workspace-java.yml'
+      - '.github/workflows/workspace-lib.yml'
+      - '.github/workflows/workspace-exe.yml'
+      - '.github/workflows/workspace-prepare.yml'
+      - '.github/workflows/doctor.yml'
+      - '.github/workflows/box.yml'
+      - '.github/workflows/headless.yml'
+  schedule:
+    - cron: '17 */6 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kyron-full-reconcile-6h
+  # A newer Workspace source dispatch supersedes expensive work on an older pin.
+  cancel-in-progress: true
+
+jobs:
+  sources:
+    name: 1 · Pin private sources
+    uses: ./.github/workflows/source-pin.yml
+    secrets: inherit
+
+  # SDK and Web have independent component validation routes. Keep the signed
+  # Workspace compiler and Pantry promotion path moving on its pinned source.
+  # Restore toolchain-written wrappers to their pinned source before promotion.
+  # An authenticated immutable Pantry SHA is shared by Java, native, executable and Prepare handoffs.
+  workspace:
+    name: 2 · Workspace full build + publish
+    needs: [sources]
+    permissions:
+      contents: write
+    if: ${{ needs.sources.result == 'success' }}
+    uses: ./.github/workflows/project-workspace.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      runtime_channel: both
+      include_launcher: true
+    secrets: inherit
+
+  # Portable validation checks signed-history non-resurrection before public mirror publication.
+  doctor:
+    name: 3 · Source validation
+    needs: [workspace]
+    if: ${{ needs.workspace.result == 'success' }}
+    uses: ./.github/workflows/doctor.yml
+    with:
+      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+    secrets: inherit
+
+  publish:
+    name: 4 · Pantry Core canonical publish
+    needs: [workspace, doctor]
+    permissions:
+      contents: write
+      actions: write
+    if: ${{ needs.doctor.result == 'success' }}
+    uses: ./.github/workflows/box.yml
+    with:
+      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+      runtime_channel: both
+      include_launcher: true
+    secrets: inherit
+
+  headless:
+    name: 5 · Post-publish runtime smoke
+    needs: [workspace, publish]
+    if: ${{ needs.publish.result == 'success' }}
+    uses: ./.github/workflows/headless.yml
+    with:
+      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+    secrets: inherit

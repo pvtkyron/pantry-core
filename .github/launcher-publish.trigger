@@ -1,0 +1,3 @@
+workspace=ea0299e7ed5b39b915a1ada1efb85782f4930088
+mode=launcher
+reason=vm100-multidevice-safe-adb-recovery
