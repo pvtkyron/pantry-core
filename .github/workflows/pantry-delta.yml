@@ -175,7 +175,6 @@ jobs:
         /security/keys/content_public.previous-local-machine-v1.pem
         /client/Launcher.exe
         /client/Launcher.build.json
-        /client/KyronCoreService.exe
         /dist/InputHost.dex
         /lib/libkyron.so
         /lib/libkyron64.so

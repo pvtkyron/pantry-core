@@ -34,14 +34,17 @@ jobs:
     - uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 8.0.x
-    - name: Verify default service-free native startup switch
+    - name: Verify native Launcher never installs a Windows Core/Tunnel service
       shell: pwsh
       run: |
         $ErrorActionPreference='Stop'
         $f=[IO.File]::ReadAllText('Launcher/jni/runtime/client/ClientMode.cpp')
-        if(!$f.Contains('const bool networkOnly=HasArg(argc,argv,"--network-only")||!HasArg(argc,argv,"--require-core")')){throw 'Default standalone boot route missing'}
-        if(!$f.Contains('const bool stageCore=!networkOnly&&!preflightOnly&&reusedCore.empty()')){throw 'Core dependency boundary drifted'}
-        if(!$f.Contains('if(!networkOnly&&!RestorePreviousSignedCore())')){throw 'Core-only rollback still blocks standalone handoff'}
+        foreach($required in @('CommitActiveBuildReceipt()','"mode","standalone"','life.RequestTakeover(false)','life.SignalCutoverReady()')){
+          if(!$f.Contains($required)){throw "Standalone authority missing: $required"}
+        }
+        foreach($retired in @('CorePayloadInstaller','StartSignedConsoleCore','KyronCoreService.exe','KyronTunnelService.exe')){
+          if($f.Contains($retired)){throw "Windows service still reachable from Launcher: $retired"}
+        }
         Write-Host '[KYRON][STANDALONE][NATIVE][OK]'
     - name: Compile existing proxy supervisor inside Launcher managed runtime
       shell: pwsh
@@ -50,12 +53,6 @@ jobs:
         dotnet build Launcher/jni/runtime/client/managed/KyronLauncherRuntime.csproj --configuration Release --framework net8.0-windows10.0.19041.0 --no-self-contained --nologo -p:Platform=x64 -p:NuGetAudit=false -v:minimal
         if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
         Write-Host '[KYRON][STANDALONE][MANAGED][OK]'
-        dotnet build Launcher/jni/runtime/core/managed/KyronCoreService.csproj --configuration Release --no-self-contained --nologo -p:Platform=x64 -p:NuGetAudit=false -v:minimal
-        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
-        Write-Host '[KYRON][STANDALONE][LEGACY-CORE-COMPAT][OK]'
-        dotnet build Launcher/jni/runtime/tunnel/managed/KyronTunnelService.csproj --configuration Release --no-self-contained --nologo -p:Platform=x64 -p:NuGetAudit=false -v:minimal
-        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
-        Write-Host '[KYRON][STANDALONE][TUNNEL-COMPAT][OK]'
     - name: Run isolated Core-free control and port-ownership tests
       shell: pwsh
       run: |

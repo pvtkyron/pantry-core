@@ -142,7 +142,6 @@ jobs:
         test -s source/Distribution/lib/libkyron.so
         test -s source/Distribution/lib/libkyron64.so
         test -s source/Distribution/client/Bootstrap.exe
-        test -s source/Distribution/client/KyronCoreService.exe
         grep -F 'AUTO_ROUTE_BEGIN="; pantry-auto-content-routes:begin"' source/Distribution/tools/rotate_runtime_routes.py >/dev/null
         grep -F 'GENERIC_ROUTE_ROOTS=(' source/Distribution/tools/rotate_runtime_routes.py >/dev/null
         grep -F 'CLIENT_SOURCE="client/launch-plane-only.marker"' source/Distribution/tools/rotate_runtime_routes.py >/dev/null

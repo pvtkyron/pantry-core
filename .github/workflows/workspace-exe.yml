@@ -390,7 +390,7 @@ jobs:
         $sha=[Security.Cryptography.SHA256]::Create();try{$bridgeSigner=(([BitConverter]::ToString($sha.ComputeHash($signature.SignerCertificate.RawData))) -replace '-','').ToLowerInvariant()}finally{$sha.Dispose()}
         if($bridgeSigner-ne([string]$meta.certificate_sha256).ToLowerInvariant()){throw 'GameLoop native bridge signer fingerprint mismatch'}
         Write-Host '[PROJECT/WORKSPACE/EXE][GAMELOOP/OK] packaged bridge signature is canonical'
-        $paths=@('Launcher\lib\x64\Release\local-machine-v1','Launcher\lib\CoreRuntime\x64\Release','Launcher\lib\TunnelRuntime\x64\Release','Launcher\lib\KyronLauncherRuntime\Release\net8.0-windows10.0.19041.0');foreach($p in @('Launcher\obj\Tools','Launcher\obj\Launcher\x64\Release\llvm\tools')){if(Test-Path -LiteralPath (Join-Path $root $p)){$paths+=$p}}
+        $paths=@('Launcher\lib\x64\Release\local-machine-v1','Launcher\lib\KyronLauncherRuntime\Release\net8.0-windows10.0.19041.0');foreach($p in @('Launcher\obj\Tools','Launcher\obj\Launcher\x64\Release\llvm\tools')){if(Test-Path -LiteralPath (Join-Path $root $p)){$paths+=$p}}
         if($paths.Count-lt5){throw 'Launcher staging output is incomplete in executable lane'}
         & (Join-Path $PWD.Path 'recipe\.github\workflows\workspace-handoff.ps1') -Mode pack -Lane exe -PantryRoot (Join-Path $PWD.Path 'source/Distribution') -WorkspaceSha $workspaceSha -PantrySha $pantrySha -Secret $env:KYRON_HANDOFF_SECRET -SourceRoot $root -Paths $paths -OutputRoot $out -Python $env:KYRON_PYTHON
         if(!$?){throw 'Executable lane handoff sealing failed'}
