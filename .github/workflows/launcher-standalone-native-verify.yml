@@ -1,0 +1,26 @@
+name: KYRON Standalone Native Signed Verification
+'on':
+  workflow_dispatch: null
+permissions:
+  contents: read
+concurrency:
+  group: kyron-standalone-native-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  sources:
+    name: Pin private source and signer inputs
+    uses: ./.github/workflows/source-pin-component.yml
+    secrets: inherit
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' }}
+  native:
+    permissions:
+      contents: read
+      actions: write
+    name: Native Release build + canonical signature (no publication)
+    needs: sources
+    uses: ./.github/workflows/workspace-exe.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      direct_publish: false
+    secrets: inherit
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' }}

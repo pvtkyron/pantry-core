@@ -1,0 +1,386 @@
+{
+  "actions-history-cleaner.yml": {
+    "lane": false,
+    "inputs": {},
+    "events": []
+  },
+  "box.yml": {
+    "lane": true,
+    "inputs": {
+      "capsule": {
+        "required": true,
+        "type": "string"
+      },
+      "runtime_channel": {
+        "required": false,
+        "default": "both",
+        "type": "string"
+      },
+      "include_launcher": {
+        "required": false,
+        "default": false,
+        "type": "boolean"
+      }
+    },
+    "events": []
+  },
+  "ci-fast-path-smoke.yml": {
+    "lane": false,
+    "inputs": {},
+    "events": []
+  },
+  "component-apk.yml": {
+    "lane": false,
+    "inputs": {},
+    "events": [
+      "component-apk"
+    ]
+  },
+  "component-dex.yml": {
+    "lane": false,
+    "inputs": {},
+    "events": [
+      "component-dex"
+    ]
+  },
+  "component-lib.yml": {
+    "lane": false,
+    "inputs": {
+      "native_scope": {
+        "description": "Native component scope",
+        "required": false,
+        "default": "vera",
+        "type": "choice",
+        "options": [
+          "vera"
+        ]
+      },
+      "validate_only": {
+        "description": "Build and verify the signed native pair without publishing",
+        "type": "boolean",
+        "default": false
+      }
+    },
+    "events": [
+      "component-lib"
+    ]
+  },
+  "component-lua.yml": {
+    "lane": false,
+    "inputs": {},
+    "events": [
+      "component-lua"
+    ]
+  },
+  "component-sdk.yml": {
+    "lane": false,
+    "inputs": {},
+    "events": [
+      "component-sdk"
+    ]
+  },
+  "component-web.yml": {
+    "lane": false,
+    "inputs": {},
+    "events": [
+      "component-web"
+    ]
+  },
+  "device-registry.yml": {
+    "lane": false,
+    "inputs": {},
+    "events": [
+      "device-enrollment"
+    ]
+  },
+  "doctor-targeted-validation.yml": {
+    "lane": false,
+    "inputs": {
+      "platform": {
+        "description": "Validation platform; reuse already-passed checks on the other platform",
+        "type": "choice",
+        "options": [
+          "Both",
+          "Portable",
+          "Windows"
+        ],
+        "default": "Both"
+      }
+    },
+    "events": []
+  },
+  "doctor.yml": {
+    "lane": true,
+    "inputs": {
+      "capsule": {
+        "required": true,
+        "type": "string"
+      },
+      "platform": {
+        "description": "Validation platform; reuse already-passed checks on the other platform",
+        "type": "choice",
+        "options": [
+          "Both",
+          "Portable",
+          "Windows"
+        ],
+        "default": "Both"
+      }
+    },
+    "events": []
+  },
+  "headless.yml": {
+    "lane": true,
+    "inputs": {
+      "capsule": {
+        "required": true,
+        "type": "string"
+      }
+    },
+    "events": []
+  },
+  "kyron-coherent-updater.yml": {
+    "lane": false,
+    "inputs": {
+      "mode": {
+        "description": "Check available release, update when idle, or install a fully verified release",
+        "required": true,
+        "type": "choice",
+        "options": [
+          "Check",
+          "Auto",
+          "Install"
+        ],
+        "default": "Check"
+      }
+    },
+    "events": []
+  },
+  "kyron-laptop-control.yml": {
+    "lane": false,
+    "inputs": {},
+    "events": [
+      "kyron-laptop-control"
+    ]
+  },
+  "kyron-laptop-notify.yml": {
+    "lane": false,
+    "inputs": {
+      "message": {
+        "description": "Short desktop notification (default: kiss)",
+        "required": false,
+        "type": "string",
+        "default": ""
+      }
+    },
+    "events": []
+  },
+  "launcher-publish.yml": {
+    "lane": false,
+    "inputs": {},
+    "events": [
+      "component-launcher"
+    ]
+  },
+  "pantry-delta.yml": {
+    "lane": false,
+    "inputs": {
+      "pantry_sha": {
+        "description": "Exact Pantry commit to publish; blank means Pantry main",
+        "required": false,
+        "default": "",
+        "type": "string"
+      }
+    },
+    "events": [
+      "pantry-delta"
+    ]
+  },
+  "pantry-mirror.yml": {
+    "lane": false,
+    "inputs": {
+      "pantry_sha": {
+        "description": "Exact Pantry commit to mirror; blank means Pantry main",
+        "required": false,
+        "default": "",
+        "type": "string"
+      }
+    },
+    "events": []
+  },
+  "pantry-watch.yml": {
+    "lane": false,
+    "inputs": {},
+    "events": []
+  },
+  "patisserie.yml": {
+    "lane": false,
+    "inputs": {},
+    "events": [
+      "workspace-release"
+    ]
+  },
+  "project-sdk.yml": {
+    "lane": true,
+    "inputs": {
+      "capsule": {
+        "required": true,
+        "type": "string"
+      }
+    },
+    "events": []
+  },
+  "project-web.yml": {
+    "lane": true,
+    "inputs": {
+      "capsule": {
+        "required": true,
+        "type": "string"
+      }
+    },
+    "events": []
+  },
+  "project-workspace.yml": {
+    "lane": true,
+    "inputs": {
+      "capsule": {
+        "required": true,
+        "type": "string"
+      },
+      "runtime_channel": {
+        "required": false,
+        "default": "both",
+        "type": "string"
+      },
+      "include_launcher": {
+        "required": false,
+        "default": false,
+        "type": "boolean"
+      }
+    },
+    "events": []
+  },
+  "source-pin-component.yml": {
+    "lane": true,
+    "inputs": {},
+    "events": []
+  },
+  "source-pin.yml": {
+    "lane": true,
+    "inputs": {},
+    "events": []
+  },
+  "source-watch.yml": {
+    "lane": false,
+    "inputs": {
+      "watch": {
+        "description": "Run the private source watcher after credential readiness succeeds",
+        "type": "boolean",
+        "default": false
+      }
+    },
+    "events": []
+  },
+  "workspace-apk.yml": {
+    "lane": true,
+    "inputs": {
+      "capsule": {
+        "required": true,
+        "type": "string"
+      },
+      "component_mode": {
+        "required": false,
+        "default": false,
+        "type": "boolean"
+      }
+    },
+    "events": []
+  },
+  "workspace-exe.yml": {
+    "lane": true,
+    "inputs": {
+      "capsule": {
+        "required": true,
+        "type": "string"
+      },
+      "direct_publish": {
+        "required": false,
+        "default": false,
+        "type": "boolean"
+      }
+    },
+    "events": []
+  },
+  "workspace-java.yml": {
+    "lane": true,
+    "inputs": {
+      "capsule": {
+        "required": true,
+        "type": "string"
+      },
+      "include_launcher": {
+        "required": false,
+        "default": false,
+        "type": "boolean"
+      },
+      "component_mode": {
+        "required": false,
+        "default": false,
+        "type": "boolean"
+      }
+    },
+    "events": []
+  },
+  "workspace-lib.yml": {
+    "lane": true,
+    "inputs": {
+      "capsule": {
+        "required": true,
+        "type": "string"
+      },
+      "include_nativebridge": {
+        "required": false,
+        "default": false,
+        "type": "boolean"
+      },
+      "direct_publish": {
+        "required": false,
+        "default": false,
+        "type": "boolean"
+      },
+      "verify_debug": {
+        "required": false,
+        "default": false,
+        "type": "boolean"
+      }
+    },
+    "events": []
+  },
+  "workspace-powershell-regression.yml": {
+    "lane": false,
+    "inputs": {},
+    "events": [
+      "component-kyronlink"
+    ]
+  },
+  "workspace-prepare.yml": {
+    "lane": true,
+    "inputs": {
+      "capsule": {
+        "required": true,
+        "type": "string"
+      },
+      "runtime_channel": {
+        "required": false,
+        "default": "both",
+        "type": "string"
+      },
+      "include_launcher": {
+        "required": false,
+        "default": false,
+        "type": "boolean"
+      }
+    },
+    "events": []
+  }
+}

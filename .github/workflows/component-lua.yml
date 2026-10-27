@@ -1,0 +1,68 @@
+name: Component · Lua
+'on':
+  workflow_dispatch: null
+  repository_dispatch:
+    types:
+    - component-lua
+permissions:
+  contents: read
+concurrency:
+  group: component-lua
+  cancel-in-progress: true
+jobs:
+  lua:
+    name: Lua · 5.3 compile + PUBG transform
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+    - name: Validate requested source revision
+      shell: bash
+      env:
+        WORKSPACE_SHA: ${{ github.event.client_payload.workspace_sha }}
+        PANTRY_SHA: ${{ github.event.client_payload.pantry_sha }}
+      run: |
+        set -euo pipefail
+        for sha in "$WORKSPACE_SHA" "$PANTRY_SHA"; do
+          [[ -z "$sha" || "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::Invalid source revision'; exit 1; }
+        done
+        [[ -z "$WORKSPACE_SHA" || -z "$PANTRY_SHA" || "$WORKSPACE_SHA" == "$PANTRY_SHA" ]] || { echo '::error::Conflicting source revisions'; exit 1; }
+    - name: Open pinned Workspace and integrated distribution
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: ${{ github.event.client_payload.pantry_sha || github.event.client_payload.workspace_sha || 'main' }}
+        path: source
+        fetch-depth: 1
+        fetch-tags: false
+        persist-credentials: false
+        show-progress: false
+        sparse-checkout: |
+          /Distribution/lua
+          /Distribution/tools/lua53_pubg.py
+        sparse-checkout-cone-mode: false
+    - name: Install Lua 5.3 compiler
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends lua5.3
+        luac5.3 -v 2>&1 | grep -F 'Lua 5.3.6'
+    - name: Compile every Lua source independently
+      shell: bash
+      run: |
+        set -euo pipefail
+        out="$RUNNER_TEMP/kyron-lua"
+        mkdir -p "$out"
+        count=0
+        while IFS= read -r -d '' source; do
+          rel="${source#source/Distribution/lua/}"
+          target="$out/${rel}.bin"
+          mkdir -p "$(dirname "$target")"
+          python source/Distribution/tools/lua53_pubg.py "$source" -o "$target" --compiler "$(command -v luac5.3)"
+          test -s "$target"
+          count=$((count + 1))
+        done < <(find source/Distribution/lua -type f -name '*.lua' -print0)
+        test "$count" -gt 0
+        echo "[COMPONENT/LUA][OK] compiled=$count"
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' }}

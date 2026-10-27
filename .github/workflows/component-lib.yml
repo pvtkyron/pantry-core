@@ -1,0 +1,59 @@
+name: Component · Native Lib
+run-name: KYRON signed native release · ${{ github.run_id }}
+'on':
+  repository_dispatch:
+    types:
+    - component-lib
+  workflow_dispatch:
+    inputs:
+      native_scope:
+        description: Native component scope
+        required: false
+        default: vera
+        type: choice
+        options:
+        - vera
+      validate_only:
+        description: Build and verify the signed native pair without publishing
+        type: boolean
+        default: false
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/component-lib.yml
+    - .github/workflows/workspace-lib.yml
+permissions:
+  contents: read
+concurrency:
+  group: component-native-lib
+  cancel-in-progress: true
+jobs:
+  readiness:
+    uses: ./.github/workflows/ci-readiness.yml
+    with:
+      require_publish_access: ${{ !inputs.validate_only }}
+    secrets: inherit
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' }}
+  sources:
+    name: Pin source batch
+    needs: readiness
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (github.event_name != 'push'
+      || !contains(github.event.head_commit.message, '[full-release]')) }}
+    uses: ./.github/workflows/source-pin-component.yml
+    secrets: inherit
+  lib:
+    permissions:
+      contents: read
+      actions: write
+    name: Lib · Android native only
+    needs: sources
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (needs.sources.result == 'success')
+      }}
+    uses: ./.github/workflows/workspace-lib.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      include_nativebridge: false
+      direct_publish: ${{ !inputs.validate_only }}
+      verify_debug: ${{ inputs.validate_only }}
+    secrets: inherit
