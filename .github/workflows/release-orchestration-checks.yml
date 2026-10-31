@@ -1,0 +1,132 @@
+name: Release orchestration regression checks
+'on':
+  workflow_dispatch: null
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/release-orchestration-checks.yml
+    - .github/workflows/workspace-reuse.yml
+    - .github/scripts/reuse_workspace_lanes.py
+    - .github/tests/test_workspace_lane_reuse.py
+    - .github/scripts/release_policy.py
+    - .github/config/hosted-release-policy.json
+    - .github/tests/test_release_policy.py
+    - .github/tests/test_release_workflow_powershell.py
+    - .github/workflows/workspace-exe.yml
+    - .github/workflows/workspace-prepare.yml
+    - .github/scripts/native_release_ready.py
+    - .github/scripts/Restore-ApprovedNativeRuntime.ps1
+    - .github/scripts/route_workspace_changes.sh
+    - .github/tests/test_native_release_readiness.py
+    - .github/tests/test_native_restore_admission.py
+    - .github/workflows/source-pin-component.yml
+    - .github/scripts/kyronlink_validation_status.py
+    - .github/tests/test_kyronlink_validation_reuse.py
+    - .github/tests/test_workspace_component_dispatch.py
+permissions:
+  contents: read
+jobs:
+  public:
+    name: Authenticated lane reuse and changed-owner routing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+        sparse-checkout: .github
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - run: python -m pip install --disable-pip-version-check --no-input cryptography==46.0.4 PyYAML==6.0.2
+    - run: 'python .github/tests/test_workspace_lane_reuse.py
+
+        python .github/tests/test_source_watch_routing.py
+
+        python .github/tests/test_workspace_component_dispatch.py
+
+
+        python .github/tests/test_native_release_readiness.py
+
+        python .github/tests/test_native_restore_admission.py
+
+        python .github/tests/test_kyronlink_validation_reuse.py
+
+        python .github/tests/test_workspace_input_key.py
+
+
+        python .github/tests/test_release_policy.py
+
+
+        python .github/tests/test_release_workflow_powershell.py
+
+        '
+  windows:
+    name: Actual Launcher source identity owner (PS5 + PS7)
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+    - name: Enable Windows Git long paths before any checkout
+      shell: pwsh
+      run: 'git config --global core.longpaths true
+
+        if($LASTEXITCODE){throw ''Git long-path setup failed''}
+
+        '
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: main
+        persist-credentials: false
+        fetch-tags: false
+        sparse-checkout: '/etc/publishing/StageLauncherForPantry.ps1
+
+          /etc/devtools/tests/Test-LauncherArtifactSourceIdentity.ps1
+
+          /etc/build/workspace-common.ps1
+
+          /etc/devtools/tests/Test-HostedNativeSource.ps1
+
+          '
+        sparse-checkout-cone-mode: false
+    - name: Verify Windows PowerShell 5 source identity behavior
+      shell: powershell
+      run: '& ./etc/devtools/tests/Test-LauncherArtifactSourceIdentity.ps1; if(!$?){exit 1}'
+    - name: Verify PowerShell 7 source identity behavior
+      shell: pwsh
+      run: '& ./etc/devtools/tests/Test-LauncherArtifactSourceIdentity.ps1; if(!$?){exit 1}'
+    - name: Verify real descendant Git trees and independent component admission
+      shell: pwsh
+      run: '& ./etc/devtools/tests/Test-HostedNativeSource.ps1; if(!$?){exit 1}'
+  delta:
+    name: Actual signed predecessor and delta publication regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: main
+        persist-credentials: false
+        fetch-tags: false
+        sparse-checkout: /*
+        sparse-checkout-cone-mode: false
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - run: python -m pip install --disable-pip-version-check --no-input -r Distribution/tools/requirements-launch.txt
+    - run: 'python -B Distribution/tests/test_delta_delivery_preservation.py
+
+        python -B Distribution/tests/test_delta_publication_runtime.py
+
+
+        python -B Distribution/tests/test_contract.py
+
+        python -B Distribution/tests/test_publish_workflow_contract.py
+
+        python -B Distribution/tests/test_prepare_snapshot_entrypoint.py
+
+        '

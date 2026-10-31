@@ -1,0 +1,56 @@
+name: Component · Launcher
+'on':
+  workflow_dispatch:
+    inputs:
+      minimum_launch_epoch:
+        description: Optional higher operator-verified launch epoch; the configured verified floor is always enforced
+        type: string
+        default: ''
+  repository_dispatch:
+    types:
+    - component-launcher
+permissions:
+  contents: read
+concurrency:
+  group: component-launcher-sparse-v1${{ github.event_name == 'repository_dispatch' && (github.event.client_payload.source_router == true || github.event.client_payload.pantry_router
+    == true || github.event.client_payload.pantry_delta == true) && '-deferred' || '' }}
+  cancel-in-progress: false
+jobs:
+  sources:
+    if: ${{ (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (github.event_name != 'push' || !contains(github.event.head_commit.message, '[full-release]')))
+      && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta
+      != true)) }}
+    name: Pin source batch
+    uses: ./.github/workflows/source-pin-component.yml
+    with:
+      require_native_delivery: true
+    secrets: inherit
+  launcher:
+    permissions:
+      contents: read
+      actions: write
+    name: Launcher · signed Windows executable only
+    needs: sources
+    if: ${{ (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (needs.sources.result == 'success') && needs.sources.outputs.delivery_pending != 'true')
+      && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta
+      != true)) }}
+    uses: ./.github/workflows/workspace-exe.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      direct_publish: true
+    secrets: inherit
+  publish:
+    name: Publish prepared Launcher delivery
+    needs:
+    - sources
+    - launcher
+    if: ${{ (needs.launcher.result == 'success' && needs.launcher.outputs.delivery_pending != 'true') && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router
+      != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta != true)) }}
+    permissions:
+      contents: write
+      actions: write
+    uses: ./.github/workflows/box.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      include_launcher: true
+    secrets: inherit

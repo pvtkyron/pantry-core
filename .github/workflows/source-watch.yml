@@ -1,0 +1,288 @@
+name: Workspace Component Source Router
+'on':
+  workflow_dispatch:
+    inputs:
+      watch:
+        description: Route the latest private Workspace revision after routing tests pass
+        type: boolean
+        default: false
+      recovery_run_id:
+        description: Prior native candidate run to recover without compilation
+        type: string
+        default: ''
+      recovery_source_sha:
+        description: Exact previous signed Workspace revision
+        type: string
+        default: ''
+      recovery_attempt:
+        description: Original signed candidate run attempt
+        type: string
+        default: '1'
+      plan_only:
+        description: Inspect exact source and component decisions without starting a build or publication
+        type: boolean
+        default: false
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/source-watch.yml
+    - .github/scripts/classify_workspace_change.sh
+    - .github/scripts/route_workspace_changes.sh
+    - .github/tests/test_source_watch_routing.py
+    - .github/tests/test_router_large_change_lists.py
+    - .github/tests/test_workspace_component_dispatch.py
+    - .github/tests/test_native_release_readiness.py
+    - .github/scripts/native_release_ready.py
+    - .github/scripts/mark_native_candidate.sh
+    - .github/scripts/recover_native_candidate.py
+    - .github/scripts/approve_native_release.py
+    - .github/workflows/native-approve.yml
+    - .github/workflows/workspace-native-approved.yml
+    - .github/workflows/project-workspace.yml
+    - .github/scripts/kyronlink_validation_status.py
+    - .github/scripts/Invoke-HostedReleaseStep.ps1
+    - .github/tests/test_hosted_supersession.py
+    - .github/scripts/reuse_workspace_lanes.py
+    - .github/workflows/workspace-reuse.yml
+    - .github/tests/test_workspace_lane_reuse.py
+    - .github/workflows/patisserie.yml
+    - .github/workflows/workspace-prepare.yml
+    - .github/scripts/workspace_input_key.py
+    - .github/tests/test_workspace_input_key.py
+  workflow_call:
+    inputs:
+      watch:
+        description: Route the latest private Workspace revision after routing tests pass
+        type: boolean
+        default: false
+      recovery_run_id:
+        description: Prior native candidate run to recover without compilation
+        type: string
+        default: ''
+      recovery_source_sha:
+        description: Exact previous signed Workspace revision
+        type: string
+        default: ''
+      recovery_attempt:
+        description: Original signed candidate run attempt
+        type: string
+        default: '1'
+      plan_only:
+        description: Inspect exact source and component decisions without starting a build or publication
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: component-source-router-${{ github.event_name == 'workflow_dispatch' && inputs.watch && 'route' || github.event_name == 'push' && 'fixtures' || 'scheduled' }}
+  cancel-in-progress: false
+jobs:
+  routing-tests:
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    name: Verify source-to-component routing
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Open router and fixtures
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        fetch-depth: 1
+        persist-credentials: false
+        show-progress: false
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Run route fixtures
+      shell: bash
+      run: 'set -euo pipefail
+
+        python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
+
+        python3 .github/tests/test_automation_requests.py
+
+        python3 .github/tests/test_source_watch_routing.py
+
+        python3 .github/tests/test_router_large_change_lists.py
+
+        python3 .github/tests/test_workspace_component_dispatch.py
+
+        python3 -m py_compile .github/scripts/native_release_ready.py .github/scripts/recover_native_candidate.py .github/scripts/kyronlink_validation_status.py .github/scripts/approve_native_release.py
+
+        python3 .github/tests/test_native_release_readiness.py
+
+        python3 .github/tests/test_pantry_delta_routing.py
+
+        python3 .github/actions/pantry-route-state/test_checkpoint.py
+
+        python3 .github/tests/test_hosted_supersession.py -v
+
+        '
+    - name: Verify authenticated handoff rejection and round trips
+      shell: bash
+      run: 'set -euo pipefail
+
+        python3 -m pip install --disable-pip-version-check --no-input ''cryptography==46.0.4''
+
+        python3 .github/tests/test_workspace_handoff.py -v
+
+
+        python3 .github/tests/test_workspace_lane_reuse.py -v
+
+
+        python3 .github/tests/test_workspace_input_key.py
+
+        '
+  watch:
+    name: Scan Workspace and dispatch only affected build lanes
+    needs: routing-tests
+    if: ${{ always() && github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch'
+      && inputs.watch && needs.routing-tests.result == 'success')) }}
+    permissions:
+      contents: write
+      actions: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - name: Open Pantry Core history for last published source pin
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        path: recipe
+        fetch-depth: 0
+        persist-credentials: false
+        show-progress: false
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: false
+    - name: Open private Workspace source without hydrating its full working tree
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: main
+        path: workspace
+        fetch-depth: 0
+        fetch-tags: false
+        lfs: false
+        persist-credentials: true
+        show-progress: false
+        sparse-checkout: '/Distribution/SrcVersion.ini
+
+          /etc/build/workspace-common.ps1
+
+          '
+        sparse-checkout-cone-mode: false
+    - name: Resolve published baseline and exact Workspace delta
+      id: scan
+      shell: bash
+      run: "set -euo pipefail\nhead=\"$(git -C workspace rev-parse HEAD | tr '[:upper:]' '[:lower:]')\"\n[[ \"$head\" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::Workspace HEAD is not an\
+        \ exact Git SHA'; exit 1; }\nbaseline=\"$(git -C recipe log -1 --format=%B --extended-regexp --grep='^Pantry-Source: [0-9a-f]{40}$' | sed -nE 's/^Pantry-Source: ([0-9a-f]{40})$/\\\
+        1/p')\"\nchanges=\"$RUNNER_TEMP/kyron-workspace-changes.txt\"\n: > \"$changes\"\nforce_full=false\nif [[ ! \"$baseline\" =~ ^[0-9a-f]{40}$ ]]; then\n  force_full=true\n  echo\
+        \ '[ROUTER][BASELINE] no published Pantry-Source marker; fail closed to Full Release'\nelif [[ \"$baseline\" != \"$head\" ]]; then\n  if ! git -C workspace fetch --quiet --no-tags\
+        \ --depth=1 origin \"$baseline\"; then\n    force_full=true\n    echo '[ROUTER][BASELINE] published source commit unavailable; fail closed to Full Release'\n  elif ! git -C workspace\
+        \ merge-base --is-ancestor \"$baseline\" \"$head\"; then\n    git -C workspace diff-tree --no-commit-id --name-only -r \"$baseline\" \"$head\" > \"$changes\"\n    force_full=true\n\
+        \    echo '[ROUTER][BASELINE] source history diverged; fail closed to Full Release'\n  else\n    git -C workspace diff-tree --no-commit-id --name-only -r \"$baseline\" \"$head\"\
+        \ > \"$changes\"\n  fi\nfi\necho \"workspace_sha=$head\" >> \"$GITHUB_OUTPUT\"\necho \"force_full=$force_full\" >> \"$GITHUB_OUTPUT\"\necho \"changes_file=$changes\" >> \"$GITHUB_OUTPUT\"\
+        \necho \"[ROUTER][SCAN] source=$head baseline=${baseline:-missing} full=$force_full changed_paths=$(wc -l < \"$changes\")\"\n"
+    - name: Fingerprint canonical native compiler inputs without compiling
+      id: native_inputs
+      shell: pwsh
+      run: '$ErrorActionPreference=''Stop''
+
+        . ./workspace/etc/build/workspace-common.ps1
+
+        $specs=@(Get-WorkspaceNativeReleasePathspecs)
+
+        $path=Join-Path $env:RUNNER_TEMP ''native-input-pathspecs.json''
+
+        [IO.File]::WriteAllText($path,($specs|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+
+        & python3 ./recipe/.github/scripts/workspace_input_key.py --workspace workspace --recipe recipe --specs-json $path
+
+        if($LASTEXITCODE){throw ''Canonical native input fingerprint failed''}
+
+        '
+    - name: Check exact native approval and existing signed candidate receipt
+      id: native_status
+      shell: bash
+      env:
+        PRIVATE_SOURCE_REPOSITORY: ${{ secrets.MIX_REPO }}
+        PRIVATE_SOURCE_TOKEN: ${{ secrets[vars.MIX_KEY_NAME] }}
+        PANTRY_TOKEN: ${{ github.token }}
+        WORKSPACE_SHA: ${{ steps.scan.outputs.workspace_sha }}
+        NATIVE_INPUTS_SHA256: ${{ steps.native_inputs.outputs.inputs_sha256 }}
+        NATIVE_SPECS_FILE: ${{ runner.temp }}/native-input-pathspecs.json
+      run: 'set -euo pipefail
+
+        python3 ./recipe/.github/scripts/native_release_ready.py ./workspace/Distribution/SrcVersion.ini
+
+        '
+    - name: Check authenticated KyronLink validation receipt
+      id: kyronlink_status
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        WORKSPACE_SHA: ${{ steps.scan.outputs.workspace_sha }}
+        KYRONLINK_WORKSPACE_ROOT: workspace
+        KYRONLINK_RECIPE_ROOT: recipe
+      run: python3 recipe/.github/scripts/kyronlink_validation_status.py
+    - name: Dispatch exact source to the affected component workflow
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        WORKSPACE_SHA: ${{ steps.scan.outputs.workspace_sha }}
+        FORCE_FULL: ${{ steps.scan.outputs.force_full }}
+        CHANGED_PATHS_FILE: ${{ steps.scan.outputs.changes_file }}
+        NATIVE_APPROVAL_READY: ${{ steps.native_status.outputs.ready }}
+        NATIVE_SOURCE_APPROVED: ${{ steps.native_status.outputs.source_approved }}
+        NATIVE_CANDIDATE_VERIFIED: ${{ steps.native_status.outputs.candidate_verified }}
+        NATIVE_CANDIDATE_MATCHES_PINS: ${{ steps.native_status.outputs.candidate_matches_pins }}
+        KYRONLINK_VALIDATED: ${{ steps.kyronlink_status.outputs.validated }}
+        ROUTER_DRY_RUN: ${{ inputs.plan_only == true }}
+      run: 'set -euo pipefail
+
+        bash ./recipe/.github/scripts/route_workspace_changes.sh
+
+        '
+  candidate_recovery:
+    name: Recover verified native receipt without rebuilding
+    needs: routing-tests
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.recovery_run_id != '' && inputs.recovery_source_sha
+      != '' && needs.routing-tests.result == 'success' }}
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+    - name: Open trusted receipt recovery recipe
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        path: recipe
+        persist-credentials: false
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: false
+    - name: Download previous signed native candidate
+      uses: actions/download-artifact@v4
+      with:
+        name: kyron-signed-native-candidate-${{ inputs.recovery_run_id }}-${{ inputs.recovery_attempt }}
+        run-id: ${{ inputs.recovery_run_id }}
+        github-token: ${{ github.token }}
+        path: handoff/native
+    - name: Verify original signed run and all six candidate file digests
+      env:
+        GH_TOKEN: ${{ github.token }}
+        CANDIDATE_SOURCE_SHA: ${{ inputs.recovery_source_sha }}
+        CANDIDATE_RUN_ID: ${{ inputs.recovery_run_id }}
+        CANDIDATE_ATTEMPT: ${{ inputs.recovery_attempt }}
+        CANDIDATE_INPUT_DIR: handoff/native
+      run: python3 recipe/.github/scripts/recover_native_candidate.py
+    - name: Upload long-lived lightweight candidate receipt only
+      uses: actions/upload-artifact@v4
+      with:
+        name: kyron-native-receipt-${{ inputs.recovery_source_sha }}
+        path: ${{ runner.temp }}/kyron-native-receipt/native-candidate-receipt.json
+        if-no-files-found: error
+        retention-days: 90
+        compression-level: 0

@@ -1,0 +1,99 @@
+name: Project SDK
+'on':
+  workflow_call:
+    inputs:
+      capsule:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      capsule:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Verify SDK project
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Open capsule helper
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        path: recipe
+        fetch-depth: 1
+        persist-credentials: false
+        show-progress: false
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: false
+    - name: Open private SDK state
+      id: state
+      uses: ./recipe/.github/actions/private-capsule
+      with:
+        mode: open
+        key: ${{ secrets[vars.MIX_KEY_NAME] }}
+        capsule: ${{ inputs.capsule }}
+        project: sdk
+    - name: Open private SDK project
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ steps.state.outputs.repo }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: ${{ steps.state.outputs.ref }}
+        path: source
+        fetch-depth: 1
+        fetch-tags: false
+        persist-credentials: false
+        show-progress: false
+        sparse-checkout: |
+          sdk/ANO_SDK.hpp
+          tools/verify_sdk_contract.py
+          sdk/verify_sdk_contract.py
+          tools/AnoUnidbgRunner.java
+          tools/UnidbgPlatformSmoke.java
+          tools/HdmpvePluginManagerProbe.java
+          tools/diagnostics/ConditionalAnoJavaCallbackProbe.java
+          tools/diagnostics/Case35QueueLengthGateProbe.java
+          tools/diagnostics/verify_case35_backend_static.py
+          tools/unidbg-runner/pom.xml
+        sparse-checkout-cone-mode: false
+    - name: Set Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Verify SDK quietly
+      shell: pwsh
+      run: |
+        $log=Join-Path $env:RUNNER_TEMP 'project-sdk.log'
+        try{
+          # Current SDK sources keep Python tools outside sdk/. Older pinned
+          # source capsules retain the reviewed legacy location.
+          $validator='./source/tools/verify_sdk_contract.py'
+          if(!(Test-Path -LiteralPath $validator -PathType Leaf)){$validator='./source/sdk/verify_sdk_contract.py'}
+          if(!(Test-Path -LiteralPath $validator -PathType Leaf)){throw 'Pinned SDK contract validator is missing'}
+          & python3 $validator ./source/sdk/ANO_SDK.hpp *>&1 | Set-Content -LiteralPath $log
+          if($LASTEXITCODE){throw 'SDK validation rejected'}
+          Write-Host '[PROJECT/SDK][OK]'
+        }catch{
+          Write-Host '[PROJECT/SDK][FAIL]'
+          if(Test-Path $log){
+            Write-Host '[PROJECT/SDK][DIAGNOSTIC/BEGIN]'
+            Get-Content -LiteralPath $log -Tail 60
+            Write-Host '[PROJECT/SDK][DIAGNOSTIC/END]'
+          }
+          exit 1
+        }finally{
+          if(Test-Path $log){Remove-Item $log -Force -ErrorAction SilentlyContinue}
+        }
+    - name: Configure Java
+      uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: '21'
+    - name: Verify Unidbg Java runner API compatibility
+      run: mvn -B -ntp -f source/tools/unidbg-runner/pom.xml -DskipTests compile
+    - name: Run original Bionic emulator smoke
+      run: mvn -B -ntp -f source/tools/unidbg-runner/pom.xml -DskipTests -Dexec.mainClass=sensevity.runtime.UnidbgPlatformSmoke
+        org.codehaus.mojo:exec-maven-plugin:3.3.0:java
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' }}

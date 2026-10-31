@@ -1,0 +1,50 @@
+name: KYRON Standalone Real Xray Singbox Mihomo
+'on':
+  workflow_dispatch: null
+permissions:
+  contents: read
+concurrency:
+  group: kyron-real-engines-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  engine-smoke:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_gcServer: '0'
+      DOTNET_CLI_USE_MSBUILD_SERVER: '0'
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+        fetch-depth: 1
+        sparse-checkout-cone-mode: false
+        sparse-checkout: |
+          Launcher/jni/runtime/client/managed
+          Launcher/jni/runtime/core/managed
+          Launcher/jni/tests/StandaloneLauncherTests
+          Shared/FirefoxVpnCore
+          Launcher/Directory.Build.props
+          Directory.Build.props
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: ${{ github.event.client_payload.workspace_sha || 'main' }}
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+    - name: Verify three pinned official engine executables and real localhost proxy forwarding
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $project='Launcher/jni/tests/StandaloneLauncherTests/StandaloneLauncherTests.csproj'
+        $scratch=Join-Path $env:RUNNER_TEMP 'kyron-real-engine-smoke'
+        dotnet run --project $project --configuration Release --property:Platform=x64 -- --real-engines $scratch
+        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+        Write-Host '[KYRON][STANDALONE][REAL-ENGINES/LOCAL-HTTP][OK]'
+        # Real production controller roundtrip: Xray started by Launcher fallback,
+        # not by this test harness; verified receipt -> detach -> adopt -> Exit.
+        dotnet run --project $project --no-build --configuration Release --property:Platform=x64 -- --supervisor-roundtrip $scratch
+        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+        Write-Host '[KYRON][STANDALONE][PRODUCTION-SUPERVISOR][OK]'
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' }}

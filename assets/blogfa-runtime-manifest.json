@@ -1,0 +1,13 @@
+{
+  "version": "2026.08.20.7",
+  "enabled": true,
+  "widget": "assets/blogfa-widget-v3.js",
+  "minHtmlBytes": 700,
+  "minCssBytes": 8000,
+  "watchdogMs": 12000,
+  "maxRecoveries": 2,
+  "cacheTtlMs": 604800000,
+  "staleCacheTtlMs": 2592000000,
+  "healthGraceMs": 12000,
+  "release": "stable-editorial"
+}

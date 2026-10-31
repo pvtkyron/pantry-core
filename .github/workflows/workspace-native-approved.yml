@@ -1,0 +1,196 @@
+name: Workspace native approved reuse lane
+'on':
+  workflow_call:
+    inputs:
+      capsule:
+        required: true
+        type: string
+    outputs:
+      publication_pending:
+        value: ${{ jobs.native.outputs.publication_pending }}
+      superseded:
+        value: ${{ jobs.native.outputs.superseded }}
+permissions:
+  contents: read
+jobs:
+  native:
+    name: Restore signed original ABI pair (no recompilation)
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' }}
+    runs-on: windows-2025
+    timeout-minutes: 70
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      publication_pending: ${{ steps.approved.outputs.pending }}
+      superseded: ${{ steps.source_admission.outputs.superseded == 'true' }}
+    steps:
+    - name: Open canonical handoff recipe
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        path: recipe
+        persist-credentials: false
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: false
+    - name: Open original encrypted private source pin
+      id: state
+      uses: ./recipe/.github/actions/private-capsule
+      with:
+        mode: open
+        key: ${{ secrets[vars.MIX_KEY_NAME] }}
+        capsule: ${{ inputs.capsule }}
+        project: workspace
+    - name: Open immutable source and official native verifier only
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: ${{ steps.state.outputs.workspace_ref }}
+        path: source
+        fetch-depth: 32
+        fetch-tags: false
+        lfs: false
+        persist-credentials: true
+        sparse-checkout: '/Distribution/SrcVersion.ini
+
+          /Distribution/.gitignore
+
+          /Distribution/tools/
+
+          /Distribution/release/
+
+          /Distribution/lib/
+
+          /VeraInternal/jni/Tools/
+
+          /VeraInternal/lib/
+
+          /etc/
+
+          /Shared/pantry_contract.hpp
+
+          '
+        sparse-checkout-cone-mode: false
+    - name: Admit immutable native source or stop a superseded run quietly
+      env:
+        PIN: ${{ steps.state.outputs.workspace_ref }}
+        GITHUB_TOKEN: ${{ github.token }}
+      shell: pwsh -NoLogo -NoProfile -NonInteractive -File recipe/.github/scripts/Invoke-HostedReleaseStep.ps1 -Script {0}
+      run: '$ErrorActionPreference=''Stop''
+
+        $head=(& git -C source rev-parse HEAD).Trim().ToLowerInvariant()
+
+        if($LASTEXITCODE-ne0-or$env:PIN-cnotmatch''^[0-9a-f]{40}$''-or$head-cne$env:PIN){throw ''Approved Native source differs from its authenticated immutable pin''}
+
+        & git -C source diff --quiet HEAD
+
+        if($LASTEXITCODE){throw ''Native reuse source tree is dirty''}
+
+        & ./source/etc/build/Assert-WorkspaceReleaseSync.ps1 -Scope Lib -Workspace (Join-Path $PWD.Path ''source'')
+
+        if(!$?){throw ''Approved Native source admission rejected''}
+
+        '
+      id: source_admission
+    - name: Bind official Windows C++ verifier toolchain
+      shell: pwsh
+      run: '$ErrorActionPreference=''Stop''
+
+        $locator=Join-Path ([Environment]::GetFolderPath(''ProgramFilesX86'')) ''Microsoft Visual Studio/Installer/vswhere.exe''
+
+        $install=@(& $locator -latest -products ''*'' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+
+        if(!$install.Count){throw ''Pinned Windows native verifier toolchain unavailable''}
+
+        $vcvars=Join-Path $install[0] ''VC/Auxiliary/Build/vcvars64.bat''
+
+        if(!(Test-Path -LiteralPath $vcvars -PathType Leaf)){throw ''Native verifier C++ initialization missing''}
+
+        $script=''call "''+$vcvars+''" && call "source\VeraInternal\jni\Tools\BuildAndroidHostTools.cmd"''
+
+        & cmd.exe /d /s /c $script
+
+        if($LASTEXITCODE){throw ''Official native signature verifier build failed''}
+
+        '
+      if: ${{ steps.source_admission.outputs.superseded != 'true' }}
+    - name: Bind pinned canonical public verifier certificate without persisting the private key
+      shell: pwsh
+      env:
+        CERT_PFX_BASE64: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
+        CERT_PFX_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+      run: "$ErrorActionPreference='Stop'\nif([string]::IsNullOrWhiteSpace($env:CERT_PFX_BASE64)-or[string]::IsNullOrWhiteSpace($env:CERT_PFX_PASSWORD)){throw 'Canonical public certificate\
+        \ source unavailable'}\n$raw=[Convert]::FromBase64String($env:CERT_PFX_BASE64)\n$password=$env:CERT_PFX_PASSWORD.TrimEnd([char[]]@([char]13,[char]10))\n$flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet\n\
+        $cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($raw,$password,$flags)\ntry{\n  $meta=Get-Content -LiteralPath 'source/etc/security/signing/canonical-signer.json'\
+        \ -Raw|ConvertFrom-Json\n  $pin=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($cert.RawData)).ToLowerInvariant()\n  if(!$cert.HasPrivateKey-or$pin-cne([string]$meta.certificate_sha256).ToLowerInvariant()){throw\
+        \ 'Canonical public verifier certificate pin mismatch'}\n  $public=[Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.RawData)\n  $store=[Security.Cryptography.X509Certificates.X509Store]::new('My',[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)\n\
+        \  try{$store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite);$store.Add($public)}finally{$store.Close();$public.Dispose()}\n}finally{$cert.Dispose();[Security.Cryptography.CryptographicOperations]::ZeroMemory($raw)}\n\
+        Write-Host '[WORKSPACE/LIB/VERIFY-TRUST][OK] only public pinned certificate registered in ephemeral runner; private key not persisted'\n"
+      if: ${{ steps.source_admission.outputs.superseded != 'true' }}
+    - name: Authenticate and restore original approved dual-ABI Native delivery
+      id: approved
+      shell: pwsh
+      env:
+        PRIVATE_SOURCE_REPOSITORY: ${{ secrets.MIX_REPO }}
+      run: '$ErrorActionPreference=''Stop''
+
+        & ./recipe/.github/scripts/Restore-ApprovedNativeRuntime.ps1 -SourceRoot ./source -ExpectedRepository $env:PRIVATE_SOURCE_REPOSITORY
+
+        if(!$?){throw ''Original approved Native RSA delivery rejected''}
+
+        if((Get-Content -LiteralPath $env:GITHUB_OUTPUT) -contains ''pending=true''){throw ''Approved native runtime not available; do not misreport readiness''}
+
+        if(!(Test-Path -LiteralPath ''source/Distribution/release/runtime-lane-v1.json'' -PathType Leaf)){throw ''Approved runtime receipt missing''}
+
+        if((Get-Content -LiteralPath $env:GITHUB_OUTPUT) -notcontains ''pending=false''){throw ''Approved Native restore did not attest readiness''}
+
+        '
+      if: ${{ steps.source_admission.outputs.superseded != 'true' }}
+    - name: Verify source-bound runtime receipt and copy only verified files into handoff
+      if: ${{ steps.source_admission.outputs.superseded != 'true' && (steps.approved.outputs.pending == 'false') }}
+      shell: pwsh
+      run: "$ErrorActionPreference='Stop'\n$root=Join-Path $PWD.Path 'source'\n$receipt=Get-Content -LiteralPath (Join-Path $root 'Distribution/release/runtime-lane-v1.json') -Raw|ConvertFrom-Json\n\
+        $source=(& git -C $root rev-parse HEAD).Trim().ToLowerInvariant()\nif($receipt.schema-ne1-or$receipt.mode-cne'all'-or$receipt.source_workspace_sha-cnotmatch'^[0-9a-f]{40}$'){throw\
+        \ 'Approved Native source receipt invalid'}\n& git -C $root merge-base --is-ancestor ([string]$receipt.source_workspace_sha) $source\nif($LASTEXITCODE){throw 'Original Native\
+        \ source not ancestor of approved source'}\nforeach($entry in @(@('armeabi-v7a','libkyron.so'),@('arm64-v8a','libkyron64.so'))){\n  $abi=$entry[0];$leaf=$entry[1];$path=Join-Path\
+        \ $root ('Distribution/lib/'+$leaf)\n  $dest=Join-Path $root ('VeraInternal/lib/'+$abi+'/libkyron.so')\n  $folder=Split-Path -Parent $dest\n  [IO.Directory]::CreateDirectory($folder)|Out-Null\n\
+        \  $digest=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()\n  $matching=@($receipt.runtime.PSObject.Properties|Where-Object{$_.Value.abi-ceq$abi-and$_.Value.sha256-ceq$digest})\n\
+        \  if($matching.Count-ne2){throw 'Approved original dual-channel runtime provenance mismatch'}\n  Copy-Item -LiteralPath $path -Destination $dest -Force\n  foreach($name in @('libkyron.release.json','libkyron.so.kyron-finalized')){\n\
+        \    Copy-Item -LiteralPath (Join-Path $root ('Distribution/release/native-attestations/'+$abi+'/'+$name)) -Destination (Join-Path $folder $name) -Force\n  }\n  if((Get-FileHash\
+        \ -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant()-cne$digest){throw 'Approved Native handoff copy changed'}\n}\n$env:KYRON_CANONICAL_SIGNER_META=Join-Path $root\
+        \ 'etc/security/signing/canonical-signer.json'\n& (Join-Path $root 'VeraInternal/lib/host/AndroidReleaseHost.exe') verify --root (Join-Path $root 'VeraInternal/lib') --abis 'armeabi-v7a,arm64-v8a'\
+        \ --require-finalized\nif($LASTEXITCODE){throw 'Approved original Native RSA/finalizer verification rejected'}\nWrite-Host '[WORKSPACE/LIB/APPROVED][OK] compiled-native=REUSED\
+        \ signed_orig_source=true dual_ABI=true'\n"
+    - name: Seal encrypted original Native handoff for existing Prepare verifier
+      id: shard
+      if: ${{ steps.source_admission.outputs.superseded != 'true' && (steps.approved.outputs.pending == 'false') }}
+      shell: pwsh
+      env:
+        KYRON_HANDOFF_SECRET: ${{ secrets[vars.MIX_KEY_NAME] }}
+      run: '$ErrorActionPreference=''Stop''
+
+        $source=(& git -C source rev-parse HEAD).Trim().ToLowerInvariant()
+
+        $pantry=(& git -C source/Distribution rev-parse HEAD).Trim().ToLowerInvariant()
+
+        if($source-cne$pantry){throw ''Restored approved Native handoff pinned Workspace/Pantry identities disagree''}
+
+        $paths=@(''VeraInternal\lib\armeabi-v7a\libkyron.so'',''VeraInternal\lib\armeabi-v7a\libkyron.release.json'',''VeraInternal\lib\armeabi-v7a\libkyron.so.kyron-finalized'',''VeraInternal\lib\arm64-v8a\libkyron.so'',''VeraInternal\lib\arm64-v8a\libkyron.release.json'',''VeraInternal\lib\arm64-v8a\libkyron.so.kyron-finalized'',''VeraInternal\lib\host\AndroidReleaseHost.exe'')
+
+        & ./recipe/.github/workflows/workspace-handoff.ps1 -Mode pack -Lane lib -PantryRoot (Join-Path $PWD.Path ''source/Distribution'') -WorkspaceSha $source -PantrySha $pantry -Secret
+        $env:KYRON_HANDOFF_SECRET -SourceRoot (Join-Path $PWD.Path ''source'') -Paths $paths -OutputRoot (Join-Path $env:RUNNER_TEMP ''native-approved-handoff'')
+
+        if(!$?){throw ''Original Native approved handoff encryption failed''}
+
+        '
+    - name: Upload encrypted approved original Native proof
+      if: ${{ steps.source_admission.outputs.superseded != 'true' && (steps.approved.outputs.pending == 'false') }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: kyron-workspace-lib-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ steps.shard.outputs.root }}
+        if-no-files-found: error
+        retention-days: 1
+        compression-level: 0
+        overwrite: true
