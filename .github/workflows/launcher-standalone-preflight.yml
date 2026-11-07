@@ -1,0 +1,88 @@
+name: KYRON Standalone Launcher (unpublished preflight)
+'on':
+  workflow_dispatch: null
+permissions:
+  contents: read
+concurrency:
+  group: kyron-standalone-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  managed:
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (github.event_name != 'pull_request'
+      || startsWith(github.head_ref, 'feature/launcher-standalone-fallback-')) }}
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+    - name: Open only managed sources in disposable GitHub runner
+      uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+        fetch-depth: 1
+        sparse-checkout: |
+          Launcher/jni/runtime/client/ClientMode.cpp
+          Launcher/jni/runtime/client/managed
+          Launcher/jni/runtime/core/managed
+          Launcher/jni/runtime/tunnel/managed
+          Launcher/jni/tests/StandaloneLauncherTests
+          Shared/FirefoxVpnCore
+          Launcher/Directory.Build.props
+          Directory.Build.props
+        sparse-checkout-cone-mode: false
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: ${{ github.event.client_payload.workspace_sha || 'main' }}
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+    - name: Verify default service-free native startup switch
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $f=[IO.File]::ReadAllText('Launcher/jni/runtime/client/ClientMode.cpp')
+        if(!$f.Contains('const bool networkOnly=HasArg(argc,argv,"--network-only")||!HasArg(argc,argv,"--require-core")')){throw 'Default standalone boot route missing'}
+        if(!$f.Contains('const bool stageCore=!networkOnly&&!preflightOnly&&reusedCore.empty()')){throw 'Core dependency boundary drifted'}
+        if(!$f.Contains('if(!networkOnly&&!RestorePreviousSignedCore())')){throw 'Core-only rollback still blocks standalone handoff'}
+        Write-Host '[KYRON][STANDALONE][NATIVE][OK]'
+    - name: Compile existing proxy supervisor inside Launcher managed runtime
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        dotnet build Launcher/jni/runtime/client/managed/KyronLauncherRuntime.csproj --configuration Release --framework net8.0-windows10.0.19041.0 --no-self-contained --nologo -p:Platform=x64 -p:NuGetAudit=false -v:minimal
+        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+        Write-Host '[KYRON][STANDALONE][MANAGED][OK]'
+        dotnet build Launcher/jni/runtime/core/managed/KyronCoreService.csproj --configuration Release --no-self-contained --nologo -p:Platform=x64 -p:NuGetAudit=false -v:minimal
+        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+        Write-Host '[KYRON][STANDALONE][LEGACY-CORE-COMPAT][OK]'
+        dotnet build Launcher/jni/runtime/tunnel/managed/KyronTunnelService.csproj --configuration Release --no-self-contained --nologo -p:Platform=x64 -p:NuGetAudit=false -v:minimal
+        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+        Write-Host '[KYRON][STANDALONE][TUNNEL-COMPAT][OK]'
+    - name: Run isolated Core-free control and port-ownership tests
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        dotnet run --project Launcher/jni/tests/StandaloneLauncherTests/StandaloneLauncherTests.csproj --configuration Release --property:Platform=x64
+        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+        Write-Host '[KYRON][STANDALONE][GUARDS][OK]'
+    - name: Verify engine remains alive after Launcher exits, then exact user Exit
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $project='Launcher/jni/tests/StandaloneLauncherTests/StandaloneLauncherTests.csproj'
+        $scratch=Join-Path $env:RUNNER_TEMP 'kyron-standalone-engine-lifecycle'
+        try {
+          dotnet run --project $project --no-build --configuration Release --property:Platform=x64 -- --lifecycle-spawn $scratch
+          if($LASTEXITCODE -ne 0){throw 'Isolated engine spawn failed'}
+          dotnet run --project $project --no-build --configuration Release --property:Platform=x64 -- --lifecycle-verify $scratch
+          if($LASTEXITCODE -ne 0){throw 'Engine PID/ports changed when parent Launcher exited'}
+          dotnet run --project $project --no-build --configuration Release --property:Platform=x64 -- --lifecycle-stop $scratch
+          if($LASTEXITCODE -ne 0){throw 'Explicit user Exit did not stop the exact owner'}
+          Write-Host '[KYRON][STANDALONE][PROCESS-LIFECYCLE][OK]'
+        }
+        finally {
+          # Only the ephemeral runner's exact test child and its own completion marker;
+          # no system-wide process termination or ProgramData cleanup.
+          $receipt=Join-Path $scratch 'engine.json'
+          if(Test-Path -LiteralPath $receipt) {
+            try { $state=Get-Content -LiteralPath $receipt -Raw|ConvertFrom-Json;Set-Content -LiteralPath $state.stop -Value 'end-test' -NoNewline -ErrorAction SilentlyContinue } catch {}
+          }
+        }

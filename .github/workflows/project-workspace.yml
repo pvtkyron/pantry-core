@@ -1,0 +1,147 @@
+name: Project Workspace
+'on':
+  workflow_call:
+    inputs:
+      capsule:
+        required: true
+        type: string
+      runtime_channel:
+        required: false
+        default: both
+        type: string
+      include_launcher:
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      delivery_pending:
+        description: Approved native delivery has not arrived yet
+        value: ${{ jobs.lib.outputs.publication_pending == 'true' || jobs.exe.outputs.delivery_pending == 'true' || jobs.prepare.outputs.delivery_pending == 'true' }}
+      superseded:
+        description: This source was superseded and must not be published
+        value: ${{ jobs.exe.outputs.superseded == 'true' || jobs.lib.outputs.superseded == 'true' || jobs.prepare.outputs.superseded == 'true' }}
+      delivery_capsule:
+        description: Encrypted private delivery state
+        value: ${{ jobs.prepare.outputs.delivery_capsule || jobs.carry.outputs.delivery_capsule }}
+      candidate_verified:
+        value: ${{ jobs.lib.outputs.candidate_verified }}
+      candidate_sha32:
+        value: ${{ jobs.lib.outputs.candidate_sha32 }}
+      candidate_sha64:
+        value: ${{ jobs.lib.outputs.candidate_sha64 }}
+  workflow_dispatch:
+    inputs:
+      capsule:
+        required: true
+        type: string
+      runtime_channel:
+        required: false
+        default: both
+        type: string
+      include_launcher:
+        required: false
+        default: false
+        type: boolean
+permissions:
+  contents: write
+jobs:
+  reuse:
+    uses: ./.github/workflows/workspace-reuse.yml
+    permissions:
+      contents: read
+      actions: read
+    with:
+      capsule: ${{ inputs.capsule }}
+      include_launcher: ${{ inputs.include_launcher }}
+      runtime_channel: ${{ inputs.runtime_channel }}
+    secrets: inherit
+  java:
+    needs: reuse
+    name: Java · compile + D8
+    uses: ./.github/workflows/workspace-java.yml
+    with:
+      capsule: ${{ inputs.capsule }}
+      include_launcher: ${{ inputs.include_launcher }}
+    secrets: inherit
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && needs.reuse.outputs.delivery_run_id == '' && needs.reuse.outputs.java_run_id == '' }}
+    permissions:
+      contents: write
+  lib:
+    needs: reuse
+    permissions:
+      contents: read
+      actions: write
+    name: Lib · restore approved original signed Native
+    uses: ./.github/workflows/workspace-native-approved.yml
+    with:
+      capsule: ${{ inputs.capsule }}
+    secrets: inherit
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && needs.reuse.outputs.delivery_run_id == '' }}
+  exe:
+    needs: reuse
+    permissions:
+      contents: read
+      actions: write
+    name: EXE · signed Windows launcher
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && inputs.include_launcher && needs.reuse.outputs.delivery_run_id == '' && needs.reuse.outputs.exe_run_id
+      == '' }}
+    uses: ./.github/workflows/workspace-exe.yml
+    with:
+      capsule: ${{ inputs.capsule }}
+    secrets: inherit
+  prepare:
+    name: Prepare · verify handoffs + Pantry
+    needs:
+    - reuse
+    - java
+    - lib
+    - exe
+    if: ${{ always() && !cancelled() && github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && needs.reuse.result == 'success' && needs.reuse.outputs.delivery_run_id
+      == '' && (needs.java.result == 'success' || (needs.java.result == 'skipped' && needs.reuse.outputs.java_run_id != '')) && needs.lib.result == 'success' && (needs.exe.result ==
+      'success' || (needs.exe.result == 'skipped' && (!inputs.include_launcher || needs.reuse.outputs.exe_run_id != ''))) && needs.exe.outputs.superseded != 'true' && needs.lib.outputs.superseded
+      != 'true' && needs.exe.outputs.delivery_pending != 'true' && needs.lib.outputs.publication_pending != 'true' }}
+    permissions:
+      contents: write
+      actions: write
+    uses: ./.github/workflows/workspace-prepare.yml
+    with:
+      capsule: ${{ inputs.capsule }}
+      runtime_channel: ${{ inputs.runtime_channel }}
+      include_launcher: ${{ inputs.include_launcher }}
+      java_run_id: ${{ needs.reuse.outputs.java_run_id }}
+      java_attempt: ${{ needs.reuse.outputs.java_attempt }}
+      exe_run_id: ${{ needs.reuse.outputs.exe_run_id }}
+      exe_attempt: ${{ needs.reuse.outputs.exe_attempt }}
+    secrets: inherit
+  carry:
+    name: Reuse prepared delivery without compiling or preparing again
+    needs: reuse
+    if: ${{ needs.reuse.result == 'success' && needs.reuse.outputs.delivery_run_id != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      delivery_capsule: ${{ steps.pin.outputs.capsule }}
+    steps:
+    - name: Download authenticated original prepared delivery
+      uses: actions/download-artifact@v4
+      with:
+        name: kyron-workspace-delivery-${{ needs.reuse.outputs.delivery_run_id }}-${{ needs.reuse.outputs.delivery_attempt }}
+        run-id: ${{ needs.reuse.outputs.delivery_run_id }}
+        github-token: ${{ github.token }}
+        path: handoff/delivery
+    - name: Upload encrypted prepared delivery
+      uses: actions/upload-artifact@v4
+      with:
+        name: kyron-workspace-delivery-${{ github.run_id }}-${{ github.run_attempt }}
+        path: handoff/delivery
+        if-no-files-found: error
+        retention-days: 2
+        compression-level: 0
+    - name: Retain original authenticated source capsule
+      id: pin
+      env:
+        CAPSULE: ${{ inputs.capsule }}
+      run: printf 'capsule=%s\n' "$CAPSULE" >> "$GITHUB_OUTPUT"

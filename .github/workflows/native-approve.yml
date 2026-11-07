@@ -1,0 +1,163 @@
+name: Approve verified Native candidate and publish release draft
+'on':
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact original signed Native Workspace source SHA
+        type: string
+        required: true
+      signed_run_id:
+        description: Original signed Native GitHub Actions run
+        type: string
+        required: true
+      signed_attempt:
+        description: Original signed candidate attempt
+        type: string
+        default: '1'
+        required: true
+      approve:
+        description: Approve all four verified ABI/channel identities and hand off to the full Release
+        type: boolean
+        default: false
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: kyron-approved-native-contract-v2-main
+  cancel-in-progress: false
+jobs:
+  approval:
+    name: Authenticated signed native promotion and exact release draft
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && inputs.approve == true }}
+    runs-on: windows-2025
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      approved_source: ${{ steps.promote.outputs.approved_workspace_sha }}
+      release_id: ${{ steps.promote.outputs.release_id }}
+    steps:
+    - name: Open canonical approval recipe
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        path: recipe
+        persist-credentials: false
+        fetch-depth: 1
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: false
+    - name: Open original signed private Workspace and release owners
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: main
+        path: source
+        fetch-depth: 32
+        filter: blob:none
+        fetch-tags: false
+        lfs: false
+        persist-credentials: true
+        show-progress: false
+        sparse-checkout-cone-mode: false
+        sparse-checkout: |
+          /Distribution/SrcVersion.ini
+          /Distribution/.gitignore
+          /Distribution/tools/
+          /Shared/pantry_contract.hpp
+          /etc/
+          /VeraInternal/jni/Tools/
+    - name: Select pinned Python for signed manifest validation
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Install minimal maintained signer/index dependencies
+      shell: pwsh
+      run: |
+        python -m pip install --disable-pip-version-check --no-input -r source/Distribution/tools/requirements-launch.txt
+        if($LASTEXITCODE){throw 'Official signer/index requirements rejected'}
+    - name: Download original signed candidate only
+      uses: actions/download-artifact@v4
+      with:
+        name: kyron-signed-native-candidate-${{ inputs.signed_run_id }}-${{ inputs.signed_attempt }}
+        run-id: ${{ inputs.signed_run_id }}
+        github-token: ${{ github.token }}
+        path: handoff/native
+    - name: Prove original compiled source, signatures and six file hashes
+      env:
+        GH_TOKEN: ${{ github.token }}
+        CANDIDATE_SOURCE_SHA: ${{ inputs.source_sha }}
+        CANDIDATE_RUN_ID: ${{ inputs.signed_run_id }}
+        CANDIDATE_ATTEMPT: ${{ inputs.signed_attempt }}
+        CANDIDATE_INPUT_DIR: handoff/native
+      shell: pwsh
+      run: |
+        python recipe/.github/scripts/recover_native_candidate.py
+        if($LASTEXITCODE){throw 'Original compiled Native provenance check rejected'}
+    - name: Build only canonical Native RSA verifier with installed Visual Studio
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $locator=Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+        if(!(Test-Path -LiteralPath $locator -PathType Leaf)){throw 'Visual Studio compiler locator unavailable'}
+        $found=@(& $locator -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+        if(!$found.Count){throw 'Official C++ compiler missing'}
+        $vcvars=Join-Path $found[0] 'VC/Auxiliary/Build/vcvars64.bat'
+        if(!(Test-Path -LiteralPath $vcvars -PathType Leaf)){throw 'Official MSVC x64 toolchain missing'}
+        $invoke='call "'+$vcvars+'" && call "source\VeraInternal\jni\Tools\BuildAndroidHostTools.cmd"'
+        & cmd.exe /d /s /c $invoke
+        if($LASTEXITCODE){throw 'Canonical Native verifier compilation failed'}
+        if(!(Test-Path -LiteralPath 'source/VeraInternal/lib/host/AndroidReleaseHost.exe' -PathType Leaf)){throw 'Native signature verifier not produced'}
+    - name: Bind pinned canonical public verifier certificate without persisting the private key
+      shell: pwsh
+      env:
+        CERT_PFX_BASE64: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
+        CERT_PFX_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+      run: |
+        $ErrorActionPreference='Stop'
+        if([string]::IsNullOrWhiteSpace($env:CERT_PFX_BASE64)-or[string]::IsNullOrWhiteSpace($env:CERT_PFX_PASSWORD)){throw 'Canonical public certificate source unavailable'}
+        $raw=[Convert]::FromBase64String($env:CERT_PFX_BASE64)
+        $password=$env:CERT_PFX_PASSWORD.TrimEnd([char[]]@([char]13,[char]10))
+        $flags=[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+        $cert=[Security.Cryptography.X509Certificates.X509Certificate2]::new($raw,$password,$flags)
+        try{
+          $meta=Get-Content -LiteralPath 'source/etc/security/signing/canonical-signer.json' -Raw|ConvertFrom-Json
+          $pin=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($cert.RawData)).ToLowerInvariant()
+          if(!$cert.HasPrivateKey-or$pin-cne([string]$meta.certificate_sha256).ToLowerInvariant()){throw 'Canonical public verifier certificate pin mismatch'}
+          $public=[Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.RawData)
+          $store=[Security.Cryptography.X509Certificates.X509Store]::new('My',[Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+          try{$store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite);$store.Add($public)}finally{$store.Close();$public.Dispose()}
+        }finally{$cert.Dispose();[Security.Cryptography.CryptographicOperations]::ZeroMemory($raw)}
+        Write-Host '[WORKSPACE/LIB/VERIFY-TRUST][OK] only public pinned certificate registered in ephemeral runner; private key not persisted'
+    - name: Rotate only source contract after independent signed Index verification and upload draft
+      id: promote
+      env:
+        CANDIDATE_SOURCE_SHA: ${{ inputs.source_sha }}
+        CANDIDATE_RUN_ID: ${{ inputs.signed_run_id }}
+        CANDIDATE_ATTEMPT: ${{ inputs.signed_attempt }}
+        SOURCE_TOKEN: ${{ secrets[vars.MIX_KEY_NAME] }}
+      shell: pwsh
+      run: |
+        python recipe/.github/scripts/approve_native_release.py
+        if($LASTEXITCODE){throw 'Signed native approval or official draft upload was blocked'}
+  dispatch:
+    name: Request canonical full release from exact approved source
+    needs: approval
+    if: ${{ needs.approval.result == 'success' && needs.approval.outputs.approved_source != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+    - name: Send verified source pin to existing atomic publisher
+      env:
+        GH_TOKEN: ${{ github.token }}
+        SOURCE_SHA: ${{ needs.approval.outputs.approved_source }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::Approved source SHA invalid'; exit 1; }
+        jq -n --arg source "$SOURCE_SHA" '{event_type:"workspace-release",client_payload:{workspace_sha:$source}}' | gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" --input -
+        echo "[NATIVE/APPROVE][DISPATCHED] exact approved Workspace source=$SOURCE_SHA; final release requires its own independent PASS"

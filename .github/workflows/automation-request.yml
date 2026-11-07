@@ -1,0 +1,43 @@
+name: Pantry Core automation requests
+'on':
+  workflow_dispatch:
+    inputs:
+      request:
+        description: Operation to execute in Pantry Core
+        type: string
+        default: refresh
+      payload:
+        description: Request data as JSON; never include secrets
+        type: string
+        default: '{}'
+  repository_dispatch:
+    types:
+    - automation-request
+  workflow_call:
+    inputs:
+      request:
+        type: string
+        default: refresh
+      payload:
+        type: string
+        default: '{}'
+permissions:
+  contents: write
+  actions: write
+jobs:
+  dispatch:
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+        fetch-depth: 1
+        sparse-checkout: .github/scripts
+        sparse-checkout-cone-mode: false
+    - name: Route request inside Pantry Core
+      env:
+        AUTOMATION_TOKEN: ${{ github.token }}
+      run: python3 .github/scripts/dispatch_automation_request.py

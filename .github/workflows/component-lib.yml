@@ -1,0 +1,92 @@
+name: Component · Native Lib
+run-name: KYRON signed native release · ${{ github.run_id }}
+'on':
+  repository_dispatch:
+    types:
+    - component-lib
+  workflow_dispatch:
+    inputs:
+      native_scope:
+        description: Native component scope
+        required: false
+        default: vera
+        type: choice
+        options:
+        - vera
+      validate_only:
+        description: Build and verify the signed native pair without publishing
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: component-native-lib${{ github.event_name == 'repository_dispatch' && (github.event.client_payload.source_router == true || github.event.client_payload.pantry_router == true
+    || github.event.client_payload.pantry_delta == true) && '-deferred' || '' }}
+  cancel-in-progress: false
+jobs:
+  readiness:
+    uses: ./.github/workflows/ci-readiness.yml
+    with:
+      require_publish_access: ${{ !inputs.validate_only }}
+    secrets: inherit
+    if: ${{ (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main') && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router
+      != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta != true)) }}
+  sources:
+    name: Pin source batch
+    needs: readiness
+    if: ${{ (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (github.event_name != 'push' || !contains(github.event.head_commit.message, '[full-release]')))
+      && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta
+      != true)) }}
+    uses: ./.github/workflows/source-pin-component.yml
+    secrets: inherit
+  lib:
+    permissions:
+      contents: read
+      actions: write
+    name: Lib · Android native only
+    needs: sources
+    if: ${{ (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (needs.sources.result == 'success')) && (github.event_name != 'repository_dispatch' ||
+      (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta != true)) }}
+    uses: ./.github/workflows/workspace-lib.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      include_nativebridge: false
+      direct_publish: ${{ !inputs.validate_only }}
+      verify_debug: ${{ inputs.validate_only == true }}
+    secrets: inherit
+  candidate_receipt:
+    name: Record verified signed candidate (publication not implied)
+    needs:
+    - sources
+    - lib
+    if: ${{ always() && github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && github.event_name == 'repository_dispatch' && github.event.client_payload.workspace_sha
+      != '' && needs.lib.outputs.candidate_verified == 'true' }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+    - name: Open candidate receipt recipe
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        path: recipe
+        persist-credentials: false
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: false
+    - name: Register verified signed pair without asserting publication
+      env:
+        GH_TOKEN: ${{ github.token }}
+        WORKSPACE_SHA: ${{ github.event.client_payload.workspace_sha }}
+        CANDIDATE_SHA32: ${{ needs.lib.outputs.candidate_sha32 }}
+        CANDIDATE_SHA64: ${{ needs.lib.outputs.candidate_sha64 }}
+        CANDIDATE_INPUTS_SHA256: ${{ needs.lib.outputs.candidate_inputs_sha256 }}
+      run: bash recipe/.github/scripts/mark_native_candidate.sh
+    - name: Preserve small verified native candidate receipt
+      uses: actions/upload-artifact@v4
+      with:
+        name: kyron-native-receipt-${{ github.event.client_payload.workspace_sha }}
+        path: ${{ runner.temp }}/kyron-native-receipt/native-candidate-receipt.json
+        if-no-files-found: error
+        retention-days: 90
+        compression-level: 0

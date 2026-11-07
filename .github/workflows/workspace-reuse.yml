@@ -1,0 +1,74 @@
+name: Workspace verified lane reuse
+'on':
+  workflow_call:
+    inputs:
+      capsule:
+        required: true
+        type: string
+      include_launcher:
+        type: boolean
+        default: false
+      runtime_channel:
+        type: string
+        default: both
+    outputs:
+      delivery_run_id:
+        value: ${{ jobs.reuse.outputs.delivery_run_id }}
+      delivery_attempt:
+        value: ${{ jobs.reuse.outputs.delivery_attempt }}
+      java_run_id:
+        value: ${{ jobs.reuse.outputs.java_run_id }}
+      java_attempt:
+        value: ${{ jobs.reuse.outputs.java_attempt }}
+      exe_run_id:
+        value: ${{ jobs.reuse.outputs.exe_run_id }}
+      exe_attempt:
+        value: ${{ jobs.reuse.outputs.exe_attempt }}
+permissions:
+  contents: read
+  actions: read
+jobs:
+  reuse:
+    name: Inspect original successful lane proofs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      delivery_run_id: ${{ steps.proof.outputs.delivery_run_id }}
+      delivery_attempt: ${{ steps.proof.outputs.delivery_attempt }}
+      java_run_id: ${{ steps.proof.outputs.java_run_id }}
+      java_attempt: ${{ steps.proof.outputs.java_attempt }}
+      exe_run_id: ${{ steps.proof.outputs.exe_run_id }}
+      exe_attempt: ${{ steps.proof.outputs.exe_attempt }}
+    steps:
+    - name: Open maintained reuse recipe
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        path: recipe
+        persist-credentials: false
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: false
+    - name: Open authenticated source identity
+      id: state
+      uses: ./recipe/.github/actions/private-capsule
+      with:
+        mode: open
+        key: ${{ secrets[vars.MIX_KEY_NAME] }}
+        capsule: ${{ inputs.capsule }}
+        project: workspace
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Install pinned envelope verifier
+      run: python -m pip install --disable-pip-version-check --no-input cryptography==46.0.4
+    - name: Verify exact source, recipe, successful job and encrypted output
+      id: proof
+      env:
+        GH_TOKEN: ${{ github.token }}
+        KYRON_HANDOFF_SECRET: ${{ secrets[vars.MIX_KEY_NAME] }}
+        SOURCE_SHA: ${{ steps.state.outputs.workspace_ref }}
+        RECIPE_SHA: ${{ github.sha }}
+        INCLUDE_LAUNCHER: ${{ inputs.include_launcher }}
+        RUNTIME_CHANNEL: ${{ inputs.runtime_channel }}
+        MINIMUM_EPOCH: ${{ github.event.client_payload.minimum_launch_epoch || '0' }}
+      run: python recipe/.github/scripts/reuse_workspace_lanes.py --recipe-sha "$RECIPE_SHA" --source-sha "$SOURCE_SHA" --include-launcher "$INCLUDE_LAUNCHER" --runtime-channel "$RUNTIME_CHANNEL" --minimum-epoch "$MINIMUM_EPOCH"

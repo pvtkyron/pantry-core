@@ -1,0 +1,170 @@
+name: Private execution for public lane requests
+'on':
+  workflow_dispatch:
+    inputs:
+      workflow:
+        description: Requested maintained lane
+        required: true
+        type: choice
+        options:
+        - box.yml
+        - doctor.yml
+        - headless.yml
+        - project-sdk.yml
+        - project-web.yml
+        - project-workspace.yml
+        - source-pin-component.yml
+        - source-pin.yml
+        - workspace-apk.yml
+        - workspace-exe.yml
+        - workspace-java.yml
+        - workspace-lib.yml
+        - workspace-prepare.yml
+      input_json:
+        description: Validated public lane inputs
+        required: true
+        type: string
+        default: '{}'
+permissions:
+  contents: write
+jobs:
+  sources:
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (inputs.workflow != 'source-pin-component.yml'
+      && !fromJSON(inputs.input_json).capsule) }}
+    uses: ./.github/workflows/source-pin.yml
+    with:
+      require_native_delivery: ${{ inputs.workflow == 'project-workspace.yml' || inputs.workflow == 'workspace-prepare.yml' || inputs.workflow == 'box.yml' || (inputs.workflow == 'workspace-exe.yml' && fromJSON(inputs.input_json).direct_publish == true) }}
+    secrets: inherit
+  component_sources:
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (inputs.workflow == 'source-pin-component.yml')
+      }}
+    uses: ./.github/workflows/source-pin-component.yml
+    secrets: inherit
+  box:
+    permissions:
+      contents: write
+      actions: write
+    needs:
+    - sources
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (!cancelled() && inputs.workflow
+      == 'box.yml' && (needs.sources.result == 'success' || needs.sources.result == 'skipped') && needs.sources.outputs.delivery_pending != 'true') }}
+    uses: ./.github/workflows/box.yml
+    with:
+      capsule: ${{ fromJSON(inputs.input_json).capsule || needs.sources.outputs.capsule }}
+      runtime_channel: ${{ fromJSON(inputs.input_json).runtime_channel || 'both' }}
+      include_launcher: ${{ fromJSON(inputs.input_json).include_launcher == true }}
+    secrets: inherit
+  doctor:
+    needs:
+    - sources
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (!cancelled() && inputs.workflow
+      == 'doctor.yml' && (needs.sources.result == 'success' || needs.sources.result == 'skipped') && needs.sources.outputs.delivery_pending != 'true') }}
+    uses: ./.github/workflows/doctor.yml
+    with:
+      capsule: ${{ fromJSON(inputs.input_json).capsule || needs.sources.outputs.capsule }}
+      platform: ${{ fromJSON(inputs.input_json).platform || 'Both' }}
+    secrets: inherit
+  headless:
+    needs:
+    - sources
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (!cancelled() && inputs.workflow
+      == 'headless.yml' && (needs.sources.result == 'success' || needs.sources.result == 'skipped') && needs.sources.outputs.delivery_pending != 'true') }}
+    uses: ./.github/workflows/headless.yml
+    with:
+      capsule: ${{ fromJSON(inputs.input_json).capsule || needs.sources.outputs.capsule }}
+    secrets: inherit
+  project_sdk:
+    needs:
+    - sources
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (!cancelled() && inputs.workflow
+      == 'project-sdk.yml' && (needs.sources.result == 'success' || needs.sources.result == 'skipped')) }}
+    uses: ./.github/workflows/project-sdk.yml
+    with:
+      capsule: ${{ fromJSON(inputs.input_json).capsule || needs.sources.outputs.capsule }}
+    secrets: inherit
+  project_web:
+    needs:
+    - sources
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (!cancelled() && inputs.workflow
+      == 'project-web.yml' && (needs.sources.result == 'success' || needs.sources.result == 'skipped')) }}
+    uses: ./.github/workflows/project-web.yml
+    with:
+      capsule: ${{ fromJSON(inputs.input_json).capsule || needs.sources.outputs.capsule }}
+    secrets: inherit
+  project_workspace:
+    permissions:
+      contents: write
+      actions: write
+    needs:
+    - sources
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (!cancelled() && inputs.workflow
+      == 'project-workspace.yml' && (needs.sources.result == 'success' || needs.sources.result == 'skipped') && needs.sources.outputs.delivery_pending != 'true') }}
+    uses: ./.github/workflows/project-workspace.yml
+    with:
+      capsule: ${{ fromJSON(inputs.input_json).capsule || needs.sources.outputs.capsule }}
+      runtime_channel: ${{ fromJSON(inputs.input_json).runtime_channel || 'both' }}
+      include_launcher: ${{ fromJSON(inputs.input_json).include_launcher == true }}
+    secrets: inherit
+  workspace_apk:
+    needs:
+    - sources
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (!cancelled() && inputs.workflow
+      == 'workspace-apk.yml' && (needs.sources.result == 'success' || needs.sources.result == 'skipped') && needs.sources.outputs.delivery_pending != 'true') }}
+    uses: ./.github/workflows/workspace-apk.yml
+    with:
+      capsule: ${{ fromJSON(inputs.input_json).capsule || needs.sources.outputs.capsule }}
+      component_mode: ${{ fromJSON(inputs.input_json).component_mode == true }}
+    secrets: inherit
+  workspace_exe:
+    permissions:
+      contents: read
+      actions: write
+    needs:
+    - sources
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (!cancelled() && inputs.workflow
+      == 'workspace-exe.yml' && (needs.sources.result == 'success' || needs.sources.result == 'skipped') && needs.sources.outputs.delivery_pending != 'true') }}
+    uses: ./.github/workflows/workspace-exe.yml
+    with:
+      capsule: ${{ fromJSON(inputs.input_json).capsule || needs.sources.outputs.capsule }}
+      direct_publish: ${{ fromJSON(inputs.input_json).direct_publish == true }}
+    secrets: inherit
+  workspace_java:
+    needs:
+    - sources
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (!cancelled() && inputs.workflow
+      == 'workspace-java.yml' && (needs.sources.result == 'success' || needs.sources.result == 'skipped') && needs.sources.outputs.delivery_pending != 'true') }}
+    uses: ./.github/workflows/workspace-java.yml
+    with:
+      capsule: ${{ fromJSON(inputs.input_json).capsule || needs.sources.outputs.capsule }}
+      include_launcher: ${{ fromJSON(inputs.input_json).include_launcher == true }}
+      component_mode: ${{ fromJSON(inputs.input_json).component_mode == true }}
+    secrets: inherit
+  workspace_lib:
+    permissions:
+      contents: read
+      actions: write
+    needs:
+    - sources
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (!cancelled() && inputs.workflow
+      == 'workspace-lib.yml' && (needs.sources.result == 'success' || needs.sources.result == 'skipped')) }}
+    uses: ./.github/workflows/workspace-lib.yml
+    with:
+      capsule: ${{ fromJSON(inputs.input_json).capsule || needs.sources.outputs.capsule }}
+      include_nativebridge: ${{ fromJSON(inputs.input_json).include_nativebridge == true }}
+      direct_publish: ${{ fromJSON(inputs.input_json).direct_publish == true }}
+      verify_debug: ${{ fromJSON(inputs.input_json).verify_debug == true }}
+    secrets: inherit
+  workspace_prepare:
+    permissions:
+      contents: write
+      actions: write
+    needs:
+    - sources
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (!cancelled() && inputs.workflow
+      == 'workspace-prepare.yml' && (needs.sources.result == 'success' || needs.sources.result == 'skipped') && needs.sources.outputs.delivery_pending != 'true') }}
+    uses: ./.github/workflows/workspace-prepare.yml
+    with:
+      capsule: ${{ fromJSON(inputs.input_json).capsule || needs.sources.outputs.capsule }}
+      runtime_channel: ${{ fromJSON(inputs.input_json).runtime_channel || 'both' }}
+      include_launcher: ${{ fromJSON(inputs.input_json).include_launcher == true }}
+    secrets: inherit

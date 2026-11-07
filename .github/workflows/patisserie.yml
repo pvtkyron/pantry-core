@@ -1,0 +1,198 @@
+name: Kyron Full Release · 6h
+run-name: Kyron full release · native + launcher + doctor · ${{ github.run_id }}
+'on':
+  workflow_dispatch:
+    inputs:
+      request:
+        description: Optional request; blank runs this workflow
+        type: string
+        default: ''
+      payload:
+        description: Public request data as JSON; never secrets
+        type: string
+        default: '{}'
+      minimum_launch_epoch:
+        description: Optional higher operator-verified launch epoch; the configured verified floor is always enforced
+        type: string
+        default: ''
+  repository_dispatch:
+    types:
+    - workspace-release
+  schedule:
+  - cron: 17 */6 * * *
+permissions:
+  contents: read
+concurrency:
+  group: kyron-full-reconcile-6h${{ github.event_name == 'repository_dispatch' && (github.event.client_payload.source_router == true || github.event.client_payload.pantry_router == true
+    || github.event.client_payload.pantry_delta == true) && '-deferred' || '' }}
+  cancel-in-progress: false
+jobs:
+  readiness:
+    uses: ./.github/workflows/ci-readiness.yml
+    secrets: inherit
+    if: ${{ github.event_name != 'schedule' && (((github.event_name != 'workflow_dispatch' || inputs.request == '') && (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main'))
+      && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta
+      != true))) }}
+  sources:
+    name: 1 · Pin private sources
+    needs: readiness
+    uses: ./.github/workflows/source-pin.yml
+    with:
+      require_native_delivery: true
+    secrets: inherit
+    if: ${{ github.event_name != 'schedule' && (((github.event_name != 'workflow_dispatch' || inputs.request == '') && (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main'))
+      && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta
+      != true))) }}
+  sdk:
+    name: Refresh SDK sources
+    needs: sources
+    uses: ./.github/workflows/project-sdk.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+    secrets: inherit
+    if: ${{ (needs.sources.result == 'success') && (github.event_name != 'repository_dispatch' || github.event.client_payload.workspace_sha == '' || github.event.client_payload.refresh_sdk
+      == true) && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta
+      != true)) }}
+  web:
+    name: Refresh Web sources
+    needs: sources
+    uses: ./.github/workflows/project-web.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+    secrets: inherit
+    if: ${{ (needs.sources.result == 'success') && (github.event_name != 'repository_dispatch' || github.event.client_payload.workspace_sha == '' || github.event.client_payload.refresh_web
+      == true) && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta
+      != true)) }}
+  native_candidate:
+    name: Release native build while approved delivery is pending
+    needs: sources
+    permissions:
+      contents: read
+      actions: write
+    if: ${{ (needs.sources.result == 'success' && needs.sources.outputs.delivery_pending == 'true' && needs.sources.outputs.contract_pending != 'true') && (github.event_name != 'repository_dispatch'
+      || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta != true)) }}
+    uses: ./.github/workflows/workspace-lib.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      include_nativebridge: false
+      direct_publish: false
+      verify_debug: false
+    secrets: inherit
+  workspace:
+    name: 2 · Workspace full build + publish
+    needs:
+    - sources
+    permissions:
+      contents: write
+      actions: write
+    if: ${{ ((github.event_name != 'workflow_dispatch' || inputs.request == '') && (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (needs.sources.result
+      == 'success') && needs.sources.outputs.delivery_pending != 'true')) && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router
+      != true && github.event.client_payload.pantry_delta != true)) }}
+    uses: ./.github/workflows/project-workspace.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      runtime_channel: both
+      include_launcher: true
+    secrets: inherit
+  doctor:
+    name: 3 · Source validation
+    needs:
+    - workspace
+    if: ${{ ((github.event_name != 'workflow_dispatch' || inputs.request == '') && (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (needs.workspace.result
+      == 'success')) && needs.workspace.outputs.superseded != 'true' && needs.workspace.outputs.delivery_pending != 'true') && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router
+      != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta != true)) }}
+    uses: ./.github/workflows/doctor.yml
+    with:
+      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+    secrets: inherit
+  publish:
+    name: 4 · Pantry Core canonical publish
+    needs:
+    - workspace
+    - doctor
+    permissions:
+      contents: write
+      actions: write
+    if: ${{ ((github.event_name != 'workflow_dispatch' || inputs.request == '') && (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (needs.doctor.result
+      == 'success'))) && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta
+      != true)) }}
+    uses: ./.github/workflows/box.yml
+    with:
+      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+      runtime_channel: both
+      include_launcher: true
+    secrets: inherit
+  headless:
+    name: 5 · Post-publish runtime smoke
+    needs:
+    - workspace
+    - publish
+    if: ${{ ((github.event_name != 'workflow_dispatch' || inputs.request == '') && (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (needs.publish.result
+      == 'success'))) && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta
+      != true)) }}
+    uses: ./.github/workflows/headless.yml
+    with:
+      capsule: ${{ needs.workspace.outputs.delivery_capsule }}
+    secrets: inherit
+  native_candidate_receipt:
+    name: Record verified signed native candidate (not published)
+    needs:
+    - sources
+    - native_candidate
+    - workspace
+    if: ${{ always() && github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && github.event_name == 'repository_dispatch' && github.event.client_payload.workspace_sha
+      != '' && (needs.native_candidate.outputs.candidate_verified == 'true' || needs.workspace.outputs.candidate_verified == 'true') }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+    - name: Open candidate receipt recipe
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        path: recipe
+        fetch-depth: 1
+        persist-credentials: false
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: false
+    - name: Register verified signed pair without asserting publication
+      env:
+        GH_TOKEN: ${{ github.token }}
+        WORKSPACE_SHA: ${{ github.event.client_payload.workspace_sha }}
+        CANDIDATE_SHA32: ${{ needs.native_candidate.outputs.candidate_verified == 'true' && needs.native_candidate.outputs.candidate_sha32 || needs.workspace.outputs.candidate_sha32
+          }}
+        CANDIDATE_SHA64: ${{ needs.native_candidate.outputs.candidate_verified == 'true' && needs.native_candidate.outputs.candidate_sha64 || needs.workspace.outputs.candidate_sha64
+          }}
+        CANDIDATE_INPUTS_SHA256: ${{ needs.native_candidate.outputs.candidate_inputs_sha256 }}
+      run: bash recipe/.github/scripts/mark_native_candidate.sh
+    - name: Preserve small verified native candidate receipt
+      uses: actions/upload-artifact@v4
+      with:
+        name: kyron-native-receipt-${{ github.event.client_payload.workspace_sha }}
+        path: ${{ runner.temp }}/kyron-native-receipt/native-candidate-receipt.json
+        if-no-files-found: error
+        retention-days: 90
+        compression-level: 0
+  request:
+    name: Run requested operation in Pantry Core
+    if: ${{ (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.request != '') && (github.event_name
+      != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta
+      != true)) }}
+    permissions:
+      contents: write
+      actions: write
+    uses: ./.github/workflows/automation-request.yml
+    with:
+      request: ${{ inputs.request }}
+      payload: ${{ inputs.payload }}
+  scan:
+    name: 6h · scan and route only changed source owners
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && github.event_name == 'schedule' }}
+    permissions:
+      contents: write
+      actions: write
+    uses: ./.github/workflows/source-watch.yml
+    with:
+      watch: true
+    secrets: inherit

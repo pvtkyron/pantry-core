@@ -1,0 +1,77 @@
+name: GlassWire App Scope C++ Syntax Gate
+'on':
+  workflow_dispatch: null
+permissions:
+  contents: read
+jobs:
+  glasswire-ui:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+        persist-credentials: false
+        sparse-checkout-cone-mode: false
+        sparse-checkout: |
+          Launcher/jni
+          Shared
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: ${{ github.event.client_payload.workspace_sha || 'main' }}
+    - name: Syntax/type-check the complete GlassWire UI translation unit
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $vswhere=Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Microsoft Visual Studio\Installer\vswhere.exe'
+        $vs=(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+        if(!$vs){throw 'MSVC compiler unavailable'}
+        $dev=Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+        $root=Join-Path $PWD.Path 'Launcher\jni'
+        $src=Join-Path $env:RUNNER_TEMP 'GlassWireAppScope.cpp'
+        [IO.File]::WriteAllText($src,'#include "ui/screens/GlassWirePanel.hpp"'+[Environment]::NewLine,[Text.Encoding]::ASCII)
+        $inc=@($root,(Join-Path $root 'vendor\ImGui'),(Join-Path $root 'vendor'),(Join-Path $PWD.Path 'Shared')) | ForEach-Object {'/I"'+$_+'"'}
+        $cmd=Join-Path $env:RUNNER_TEMP 'GlassWireAppScope.cmd'
+        $cc='cl.exe /nologo /Zs /std:c++20 /EHsc /permissive- /utf-8 /W3 /DWIN32_LEAN_AND_MEAN /DNOMINMAX /DUNICODE /D_UNICODE '+($inc -join ' ')+' "'+$src+'"'
+        $lines=@('@echo off',('call "'+$dev+'" -arch=amd64 -host_arch=amd64 >nul'),'if errorlevel 1 exit /b %errorlevel%',$cc,'exit /b %errorlevel%')
+        [IO.File]::WriteAllText($cmd,($lines -join [Environment]::NewLine)+[Environment]::NewLine,[Text.Encoding]::ASCII)
+        & cmd.exe /d /c ('"'+$cmd+'"')
+        if($LASTEXITCODE -ne 0){throw 'GlassWire native C++ syntax/type gate failed'}
+        Write-Host '[KYRON][GLASSWIRE][APP-SCOPE][NATIVE][OK]'
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' }}
+  managed-app-focus:
+    runs-on: windows-2025
+    timeout-minutes: 18
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+        persist-credentials: false
+        sparse-checkout-cone-mode: false
+        sparse-checkout: |
+          Launcher/jni
+          Shared
+          Directory.Build.props
+          Launcher/Directory.Build.props
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: ${{ github.event.client_payload.workspace_sha || 'main' }}
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+    - name: Compile standalone and Core against the same focus ledger
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        dotnet build Launcher/jni/runtime/client/managed/KyronLauncherRuntime.csproj -c Release --no-self-contained --nologo -p:Platform=x64 -p:NuGetAudit=false -v:minimal
+        if($LASTEXITCODE -ne 0){throw 'Standalone focus compile failed'}
+        dotnet build Launcher/jni/runtime/core/managed/KyronCoreService.csproj -c Release --no-self-contained --nologo -p:Platform=x64 -p:NuGetAudit=false -v:minimal
+        if($LASTEXITCODE -ne 0){throw 'Core compatibility focus compile failed'}
+    - name: Verify 600-flow selected-app isolation and truthful time buckets
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        dotnet run --project Launcher/jni/tests/CoreUsageTests/KyronCoreUsageTests.csproj -c Release --nologo -p:NuGetAudit=false
+        if($LASTEXITCODE -ne 0){throw 'Selected app / resource budget tests failed'}
+        Write-Host '[KYRON][GLASSWIRE][FOCUS][ACCOUNTING][OK]'
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' }}
