@@ -419,6 +419,7 @@ jobs:
         path: ${{ steps.prepared.outputs.root }}
         if-no-files-found: error
         retention-days: 2
+        compression-level: 0
     - name: Remove ephemeral signer files
       if: ${{ always() }}
       shell: pwsh
