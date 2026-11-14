@@ -1,0 +1,90 @@
+name: KYRON Launcher compiler-source boundary audit (read-only)
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Prove signed source carry and reject missing or changed inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+    - name: Open exact audit recipe
+      uses: actions/checkout@v6
+      with:
+        path: recipe
+        ref: ${{ github.sha }}
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: false
+        persist-credentials: false
+    - name: Open current private Launcher identity owner
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: main
+        path: source
+        sparse-checkout: /etc/publishing/StageLauncherForPantry.ps1
+        sparse-checkout-cone-mode: false
+        fetch-depth: 1
+        persist-credentials: false
+    - name: Install pinned fixture Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Exercise real Launcher identity function with immutable Git fixtures
+      shell: pwsh
+      run: |
+        Set-StrictMode -Version Latest
+        $ErrorActionPreference='Stop'
+        $path=Join-Path $PWD.Path 'source/etc/publishing/StageLauncherForPantry.ps1'
+        $tokens=$null;$errors=$null
+        $ast=[Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+        if($errors.Count){throw 'Launcher staging source has PowerShell syntax errors'}
+        $defs=@($ast.FindAll({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-ceq'Resolve-LauncherArtifactSourceIdentity'},$true))
+        if($defs.Count-ne1){throw 'Canonical Launcher source identity function missing'}
+        . ([scriptblock]::Create($defs[0].Extent.Text))
+        $root=Join-Path $env:RUNNER_TEMP ('kyron-identity-proof-'+[guid]::NewGuid().ToString('N'))
+        [IO.Directory]::CreateDirectory($root)|Out-Null
+        function G([string[]]$argv){$r=@(& git -C $root @argv);if($LASTEXITCODE-ne0){throw ('Fixture Git failed: '+($argv -join ' '))};return $r}
+        [void](G @('init','-q','-b','main'))
+        [void](G @('config','user.name','Fixture'))
+        [void](G @('config','user.email','fixture@example.invalid'))
+        [IO.Directory]::CreateDirectory((Join-Path $root 'Launcher'))|Out-Null
+        [IO.Directory]::CreateDirectory((Join-Path $root 'etc/devtools'))|Out-Null
+        [IO.Directory]::CreateDirectory((Join-Path $root 'Distribution/lua'))|Out-Null
+        [IO.File]::WriteAllText((Join-Path $root 'Launcher/code.cpp'),'original')
+        [IO.File]::WriteAllText((Join-Path $root 'etc/devtools/KyronReleaseGate.py'),"SOURCES=('Launcher','etc/devtools/KyronReleaseGate.py')")
+        [IO.File]::WriteAllText((Join-Path $root 'Distribution/lua/script.lua'),'one')
+        [void](G @('add','-A'));[void](G @('commit','-qm','baseline'))
+        $original=([string](G @('rev-parse','HEAD'))).Trim()
+        [IO.File]::WriteAllText((Join-Path $root 'Distribution/lua/script.lua'),'two')
+        [void](G @('add','-A'));[void](G @('commit','-qm','lua only'))
+        $current=([string](G @('rev-parse','HEAD'))).Trim()
+        $plan='d'*40
+        $env:KYRON_VERIFIED_REUSED_EXE_SOURCE=$original
+        $accepted=Resolve-LauncherArtifactSourceIdentity -WorkspaceRoot $root -HeadRevision $current -PlanRevision $plan -ArtifactCommit $original.Substring(0,12)
+        if($accepted-cne$original){throw 'Original compiler identity was relabeled or wrongly rejected'}
+        $env:KYRON_VERIFIED_REUSED_EXE_SOURCE=''
+        $blocked=$false
+        try{Resolve-LauncherArtifactSourceIdentity -WorkspaceRoot $root -HeadRevision $current -PlanRevision $plan -ArtifactCommit $original.Substring(0,12)|Out-Null}catch{$blocked=$true}
+        if(!$blocked){throw 'Old compiler admitted with no signed proof'}
+        $env:KYRON_VERIFIED_REUSED_EXE_SOURCE='e'*40
+        $blocked=$false
+        try{Resolve-LauncherArtifactSourceIdentity -WorkspaceRoot $root -HeadRevision $current -PlanRevision $plan -ArtifactCommit $original.Substring(0,12)|Out-Null}catch{$blocked=$true}
+        if(!$blocked){throw 'Wrong original compiled source accepted'}
+        $env:KYRON_VERIFIED_REUSED_EXE_SOURCE=$original
+        [IO.File]::WriteAllText((Join-Path $root 'Launcher/code.cpp'),'changed')
+        [void](G @('add','-A'));[void](G @('commit','-qm','changed compiled code'))
+        $new=([string](G @('rev-parse','HEAD'))).Trim()
+        $blocked=$false
+        try{Resolve-LauncherArtifactSourceIdentity -WorkspaceRoot $root -HeadRevision $new -PlanRevision $plan -ArtifactCommit $original.Substring(0,12)|Out-Null}catch{$blocked=$true}
+        if(!$blocked){throw 'Changed Launcher compiler inputs admitted'}
+        $env:KYRON_VERIFIED_REUSED_EXE_SOURCE=''
+        $accepted=Resolve-LauncherArtifactSourceIdentity -WorkspaceRoot $root -HeadRevision $new -PlanRevision $plan -ArtifactCommit $new.Substring(0,12)
+        if($accepted-cne$new){throw 'Current original source must remain accepted'}
+        # Deliberately rejected Git-compiler proof fixtures may leave a nonzero native tool exit code.
+        # All positive and negative assertions above succeeded; reset only the test process status.
+        $global:LASTEXITCODE=0
+        Write-Host '[KYRON/LAUNCHER/REUSE/PROOF][PASS] valid previous source retained; absent, forged and changed original rejected; current build preserved; no compile, publish, or persistent files'
+        exit 0

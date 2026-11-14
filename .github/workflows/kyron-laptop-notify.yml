@@ -1,0 +1,55 @@
+name: KYRON Laptop Notification
+'on':
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Short desktop notification (default: kiss)'
+        required: false
+        type: string
+        default: ''
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/kyron-laptop-notify.yml
+permissions:
+  contents: read
+concurrency:
+  group: kyron-laptop-notify
+  cancel-in-progress: false
+jobs:
+  notify:
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (github.repository == 'pvtkyron/pantry-core'
+      && github.ref == 'refs/heads/main') }}
+    runs-on:
+    - self-hosted
+    - Windows
+    - X64
+    - kyron-laptop
+    timeout-minutes: 3
+    steps:
+    - name: Show a safe message from GitHub on KYRON
+      shell: powershell
+      env:
+        REQUESTED_TEXT: ${{ github.event.inputs.message }}
+      run: |
+        $ErrorActionPreference='Stop'
+        if($env:COMPUTERNAME -ine 'KYRON'){throw 'Wrong target computer'}
+        $session=[System.Diagnostics.Process]::GetCurrentProcess().SessionId
+        if($session -eq 0){throw 'Runner is not in an interactive Windows session'}
+        $msg=[char]::ConvertFromUtf32(0x1F48B)
+        if(-not [string]::IsNullOrWhiteSpace($env:REQUESTED_TEXT)){$msg=$env:REQUESTED_TEXT.Trim()}
+        if($msg.Length -gt 160){throw 'Notification exceeds 160 characters'}
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+        $toast=New-Object System.Windows.Forms.NotifyIcon
+        try{
+          $toast.Icon=[System.Drawing.SystemIcons]::Information
+          $toast.BalloonTipIcon=[System.Windows.Forms.ToolTipIcon]::Info
+          $toast.BalloonTipTitle='KYRON / GitHub'
+          $toast.BalloonTipText=$msg
+          $toast.Visible=$true
+          $toast.ShowBalloonTip(2500)
+          Write-Host "[KYRON/GITHUB/NOTIFY][OK] host=$env:COMPUTERNAME session=$session message=$msg"
+          Start-Sleep -Milliseconds 2500
+        }finally{$toast.Dispose()}

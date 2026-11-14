@@ -1,0 +1,103 @@
+name: Pinned native toolchains
+description: Reuse only verified upstream LLVM and the requested NDK; never cache private sources or build outputs
+inputs:
+  source_root:
+    description: Authenticated pinned Workspace checkout
+    default: source
+  include_ndk:
+    description: Restore and provision the pinned Android NDK
+    default: 'false'
+outputs:
+  sdk_root:
+    description: Canonical SDK root selected by Workspace
+    value: ${{ steps.paths.outputs.sdk_root }}
+  ndk_path:
+    description: Exact pinned NDK installation
+    value: ${{ steps.paths.outputs.ndk_path }}
+  llvm_path:
+    description: Exact versioned LLVM installation
+    value: ${{ steps.paths.outputs.llvm_path }}
+runs:
+  using: composite
+  steps:
+  - name: Resolve exact versioned upstream tool paths
+    id: paths
+    shell: pwsh
+    env:
+      SOURCE_ROOT: ${{ inputs.source_root }}
+      INCLUDE_NDK: ${{ inputs.include_ndk }}
+    run: |
+      $ErrorActionPreference='Stop'
+      if($env:INCLUDE_NDK -notin @('true','false')){throw 'include_ndk must be true or false'}
+      $source=[IO.Path]::GetFullPath($env:SOURCE_ROOT)
+      . (Join-Path $source 'etc/build/workspace-common.ps1')
+      $sdk=Resolve-WorkspaceSdkRoot
+      $lockPath=Join-Path $source 'etc/build/toolchains.lock.json'
+      $lock=Get-Content -LiteralPath $lockPath -Raw|ConvertFrom-Json
+      "sdk_root=$sdk" >> $env:GITHUB_OUTPUT
+      foreach($row in @(@('llvm',[string]$lock.windows.llvmMingw.folder,'setup-windows-toolchain.ps1'),@('ndk',[string]$lock.android.ndkFolder,'repair-pinned-ndk.ps1'))){
+        if(!$row[1] -or [IO.Path]::IsPathRooted($row[1])){throw 'Toolchain folder must be SDK-relative'}
+        $path=[IO.Path]::GetFullPath((Join-Path $sdk $row[1]))
+        if(!$path.StartsWith($sdk.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'Toolchain cache escaped its SDK owner'}
+        $owner=Join-Path $source ('etc/build/'+$row[2])
+        $key=(Get-FileHash -LiteralPath $lockPath -Algorithm SHA256).Hash.ToLowerInvariant()+'-'+(Get-FileHash -LiteralPath $owner -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$($row[0])_path=$path" >> $env:GITHUB_OUTPUT
+        "$($row[0])_key=$key" >> $env:GITHUB_OUTPUT
+      }
+  - name: Restore pinned LLVM installation
+    id: llvm
+    uses: actions/cache/restore@v6.1.0
+    with:
+      path: ${{ steps.paths.outputs.llvm_path }}
+      key: workspace-native-llvm-installed-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.llvm_key }}
+  - name: Restore pinned NDK installation
+    id: ndk
+    if: ${{ inputs.include_ndk == 'true' }}
+    uses: actions/cache/restore@v6.1.0
+    with:
+      path: ${{ steps.paths.outputs.ndk_path }}
+      key: workspace-native-ndk-installed-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.ndk_key }}
+  - name: Verify and provision through canonical toolchain owners
+    shell: pwsh
+    env:
+      SOURCE_ROOT: ${{ inputs.source_root }}
+      INCLUDE_NDK: ${{ inputs.include_ndk }}
+      SDK_ROOT: ${{ steps.paths.outputs.sdk_root }}
+      NDK_PATH: ${{ steps.paths.outputs.ndk_path }}
+      LLVM_PATH: ${{ steps.paths.outputs.llvm_path }}
+    run: |
+      $ErrorActionPreference='Stop'
+      $source=[IO.Path]::GetFullPath($env:SOURCE_ROOT)
+      $timer=[Diagnostics.Stopwatch]::StartNew();$ndkSeconds=0
+      if($env:INCLUDE_NDK -eq 'true'){
+        & (Join-Path $source 'etc/build/repair-pinned-ndk.ps1') -SdkRoot $env:SDK_ROOT
+        if(!$?){throw 'Pinned NDK provisioning failed'}
+        $lock=Get-Content -LiteralPath (Join-Path $source 'etc/build/toolchains.lock.json') -Raw|ConvertFrom-Json
+        $props=Get-Content -LiteralPath (Join-Path $env:NDK_PATH 'source.properties') -Raw
+        if($props -notmatch ('(?m)^Pkg\.Revision\s*=\s*'+[regex]::Escape([string]$lock.android.ndkVersion)+'\s*$')){throw 'Cached NDK revision differs from the pinned lock'}
+        foreach($leaf in @('ndk-build.cmd','toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe')){
+          if(!(Test-Path -LiteralPath (Join-Path $env:NDK_PATH $leaf) -PathType Leaf)){throw 'Pinned NDK is incomplete'}
+        }
+        "KYRON_NDK=$env:NDK_PATH" >> $env:GITHUB_ENV
+        "ANDROID_NDK_HOME=$env:NDK_PATH" >> $env:GITHUB_ENV
+        $ndkSeconds=[math]::Round($timer.Elapsed.TotalSeconds,1);$timer.Restart()
+      }
+      & (Join-Path $source 'etc/build/setup-windows-toolchain.ps1') -SdkRoot $env:SDK_ROOT
+      if(!$?){throw 'Pinned LLVM provisioning failed'}
+      if(!(Test-Path -LiteralPath (Join-Path $env:LLVM_PATH 'bin/clang++.exe') -PathType Leaf)){throw 'Pinned LLVM is incomplete'}
+      "KYRON_CANONICAL_SDK_ROOT=$env:SDK_ROOT" >> $env:GITHUB_ENV
+      "KYRON_SDK_ROOT=$env:SDK_ROOT" >> $env:GITHUB_ENV
+      "KYRON_LLVM_MINGW=$(Join-Path $env:SDK_ROOT 'LLVMMinGW/current')" >> $env:GITHUB_ENV
+      Write-Host "[TOOLCHAINS][VERIFIED] ndk_seconds=$ndkSeconds llvm_seconds=$([math]::Round($timer.Elapsed.TotalSeconds,1)) private_outputs_cached=false"
+  - name: Retain verified LLVM before downstream build or publication
+    if: ${{ steps.llvm.outputs.cache-hit != 'true' }}
+    uses: actions/cache/save@v6.1.0
+    with:
+      path: ${{ steps.paths.outputs.llvm_path }}
+      key: ${{ steps.llvm.outputs.cache-primary-key }}
+  - name: Retain verified NDK before downstream build or publication
+    if: ${{ inputs.include_ndk == 'true' && steps.ndk.outputs.cache-hit != 'true' }}
+    uses: actions/cache/save@v6.1.0
+    with:
+      path: ${{ steps.paths.outputs.ndk_path }}
+      key: ${{ steps.ndk.outputs.cache-primary-key }}

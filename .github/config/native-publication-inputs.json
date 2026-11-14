@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "paths": [
+    "etc/publishing/Assert-LibContractRotation.ps1",
+    "etc/publishing/Update-PantryArtifacts.ps1",
+    "Distribution/tools/prepare_snapshot.py",
+    "Distribution/tests/test_prepare_snapshot_entrypoint.py",
+    "Distribution/tools/runtime_required_repair.py",
+    "Distribution/tests/test_native_wrapped_routes.py",
+    "etc/devtools/tests/ServiceFreeLifecycleTests.ps1",
+    "etc/devtools/Test-DeviceEnrollmentScriptIntegrity.ps1",
+    "etc/devtools/Test-KyronBootstrapDownloads.ps1",
+    "etc/testing/skills/kyron-bootstrap-download-audit/SKILL.md",
+    "etc/publishing/Compose-PantryDeliveryProvenance.ps1",
+    "etc/devtools/tests/Test-PantryIndependentLanes.ps1",
+    "Distribution/tools/kyron_pipeline.py",
+    "Distribution/tests/test_required_signed_routes.py",
+    "etc/publishing/StageLauncherForPantry.ps1"
+  ]
+}
