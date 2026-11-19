@@ -1,0 +1,334 @@
+name: Release orchestration regression checks
+'on':
+  workflow_dispatch:
+    inputs:
+      handoff_run_id:
+        description: Existing signed executable handoff run ID (diagnostic only)
+        required: false
+        type: string
+        default: ''
+      handoff_workspace_sha:
+        description: Immutable Workspace revision of the handoff
+        required: false
+        type: string
+        default: ''
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/release-orchestration-checks.yml
+    - .github/workflows/native-approve.yml
+    - .github/config/native-publication-inputs.json
+    - .github/workflows/headless.yml
+    - .github/workflows/pantry-mirror.yml
+    - .github/tests/test_mirror_policy_input.py
+    - .github/scripts/Invoke-HostedReleaseStep.ps1
+    - .github/tests/test_hosted_supersession.py
+    - .github/scripts/pantry_route_state.py
+    - .github/actions/pantry-route-state/**
+    - .github/tests/test_pantry_route_state.py
+    - .github/tests/test_pantry_delta_routing.py
+    - .github/workflows/pantry-delta.yml
+    - .github/scripts/Seal-PreparedDelivery.ps1
+    - .github/tests/Test-PreparedLauncherIdentity.ps1
+    - .github/workflows/component-lib.yml
+    - .github/workflows/launcher-publish.yml
+    - .github/workflows/patisserie.yml
+    - .github/tests/test_patisserie_critical_path.py
+    - .github/scripts/select_native_candidate.py
+    - .github/scripts/approve_native_release.py
+    - .github/scripts/mark_native_candidate.sh
+    - .github/tests/test_native_auto_promotion.py
+    - .github/workflows/workspace-reuse.yml
+    - .github/actions/pinned-toolchains/**
+    - .github/workflows/workspace-lib.yml
+    - .github/workflows/box.yml
+    - .github/scripts/reuse_workspace_lanes.py
+    - .github/tests/test_workspace_lane_reuse.py
+    - .github/scripts/workspace_lane_source.py
+    - .github/config/workspace-lane-inputs.json
+    - .github/tests/test_workspace_lane_source.py
+    - .github/scripts/release_policy.py
+    - .github/config/hosted-release-policy.json
+    - .github/tests/test_release_policy.py
+    - .github/scripts/advance_launcher_epoch_floor.py
+    - .github/tests/test_launcher_epoch_floor.py
+    - .github/tests/test_prepared_mirror_routing.py
+    - .github/tests/test_release_workflow_powershell.py
+    - .github/workflows/workspace-exe.yml
+    - .github/workflows/workspace-prepare.yml
+    - .github/scripts/native_release_ready.py
+    - .github/scripts/Restore-ApprovedNativeRuntime.ps1
+    - .github/scripts/route_workspace_changes.sh
+    - .github/tests/test_native_release_readiness.py
+    - .github/tests/test_native_restore_admission.py
+    - .github/workflows/source-pin-component.yml
+    - .github/scripts/kyronlink_validation_status.py
+    - .github/tests/test_kyronlink_validation_reuse.py
+    - .github/tests/test_workspace_component_dispatch.py
+permissions:
+  contents: read
+jobs:
+  public:
+    name: Authenticated lane reuse and changed-owner routing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+        sparse-checkout: .github
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - run: python -m pip install --disable-pip-version-check --no-input cryptography==46.0.4 PyYAML==6.0.2
+    - run: 'python .github/tests/test_hosted_supersession.py
+
+        python .github/tests/test_pantry_route_state.py
+
+        python .github/actions/pantry-route-state/test_checkpoint.py
+
+        python .github/tests/test_pantry_delta_routing.py
+
+        python .github/tests/test_mirror_policy_input.py
+
+        python .github/tests/test_native_auto_promotion.py
+
+        python .github/tests/test_workspace_lane_reuse.py
+
+        python .github/tests/test_verified_precompiled_dex.py
+
+        python .github/tests/test_workspace_lane_source.py
+
+        python .github/tests/test_source_watch_routing.py
+
+        python .github/tests/test_workspace_component_dispatch.py
+
+
+        python .github/tests/test_native_release_readiness.py
+
+        python .github/tests/test_native_restore_admission.py
+
+        python .github/tests/test_kyronlink_validation_reuse.py
+
+        python .github/tests/test_workspace_input_key.py
+
+
+        python .github/tests/test_release_policy.py
+
+        python .github/tests/test_launcher_epoch_floor.py
+
+        python .github/tests/test_prepared_mirror_routing.py
+
+
+        python .github/tests/test_patisserie_critical_path.py
+
+        python .github/tests/test_release_workflow_powershell.py
+
+        '
+  windows:
+    name: Actual Launcher source identity owner (PS5 + PS7)
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+    - name: Enable Windows Git long paths before any checkout
+      shell: pwsh
+      run: 'git config --global core.longpaths true
+
+        if($LASTEXITCODE){throw ''Git long-path setup failed''}
+
+        '
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: main
+        persist-credentials: false
+        fetch-tags: false
+        sparse-checkout: '/etc/publishing/StageLauncherForPantry.ps1
+
+          /etc/devtools/tests/Test-LauncherArtifactSourceIdentity.ps1
+
+          /etc/build/workspace-common.ps1
+
+          /etc/devtools/tests/Test-HostedNativeSource.ps1
+
+          '
+        sparse-checkout-cone-mode: false
+    - name: Verify Windows PowerShell 5 source identity behavior
+      shell: powershell
+      run: '& ./etc/devtools/tests/Test-LauncherArtifactSourceIdentity.ps1; if(!$?){exit 1}'
+    - name: Verify PowerShell 7 source identity behavior
+      shell: pwsh
+      run: '& ./etc/devtools/tests/Test-LauncherArtifactSourceIdentity.ps1; if(!$?){exit 1}'
+    - name: Verify real descendant Git trees and independent component admission
+      shell: pwsh
+      run: '& ./etc/devtools/tests/Test-HostedNativeSource.ps1; if(!$?){exit 1}'
+  delta:
+    name: Actual signed predecessor and delta publication regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: main
+        persist-credentials: false
+        fetch-tags: false
+        sparse-checkout: /*
+        sparse-checkout-cone-mode: false
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - run: python -m pip install --disable-pip-version-check --no-input -r Distribution/tools/requirements-launch.txt
+    # The maintained native C++ Session snapshot fixture is compiled and executed on Windows below.
+    - run: 'python -B Distribution/tests/test_native_wrapped_routes.py
+
+        python -B Distribution/tests/test_required_signed_routes.py
+
+        python -B Distribution/tests/test_delta_delivery_preservation.py
+
+        python -B Distribution/tests/test_delta_publication_runtime.py
+
+
+        python -B Distribution/tests/test_contract.py
+
+        python -B Distribution/tests/test_publish_workflow_contract.py
+
+        python -B Distribution/tests/test_prepare_snapshot_entrypoint.py
+
+        python -B etc/publishing/tests/test_automatic_source_publication.py
+
+        python -B etc/publishing/tests/test_lib_contract_rotation_version.py
+
+        '
+
+  session_snapshot_windows:
+    name: Windows-only native Session snapshot regression
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+    - name: Enable Git long paths
+      shell: pwsh
+      run: git config --global core.longpaths true
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: main
+        persist-credentials: false
+        fetch-tags: false
+        sparse-checkout: |
+          /Launcher/
+          /etc/build/
+          /Directory.Build.props
+        sparse-checkout-cone-mode: false
+    - name: Provision pinned LLVM-MinGW native test compiler
+      shell: pwsh
+      run: |
+        & ./etc/build/setup-windows-toolchain.ps1 -SdkRoot 'D:\kyron-sdk'
+        if($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath 'D:\kyron-sdk\LLVMMinGW\20260908\bin\clang++.exe')){throw 'Pinned fixture compiler unavailable'}
+        Add-Content -LiteralPath $env:GITHUB_PATH -Value 'D:\kyron-sdk\LLVMMinGW\20260908\bin'
+    - name: Verify actual Session snapshot protocol on Windows
+      shell: pwsh
+      run: |
+        $compiler='D:\kyron-sdk\LLVMMinGW\20260908\bin\clang++.exe'
+        $exe=Join-Path $env:RUNNER_TEMP 'kyron-session-file-native.exe'
+        & $compiler '-std=c++20' '-O2' '-Wall' '-Wextra' '-Werror' '-D_WIN32_WINNT=0x0A00' '-DWINVER=0x0A00' '-municode' '-I' 'Launcher/jni/platform/windows' '-o' $exe 'Launcher/jni/tests/KyronSessionFileNativeTests.cpp' 'Launcher/jni/runtime/native/KyronSessionFileNative.cpp'
+        if($LASTEXITCODE){throw 'Native Session snapshot compile failed'}
+        & $exe
+        if($LASTEXITCODE){throw 'Native Session snapshot runtime regression failed'}
+  delivery_identity:
+    name: Prepared Launcher provenance (PS5 + PS7)
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+        sparse-checkout: .github
+    - name: Preserve actual compiled Launcher identity on Windows PowerShell 5
+      shell: powershell
+      run: '& ./.github/tests/Test-PreparedLauncherIdentity.ps1; if(!$?){exit 1}'
+    - name: Preserve actual compiled Launcher identity on PowerShell 7
+      shell: pwsh
+      run: '& ./.github/tests/Test-PreparedLauncherIdentity.ps1; if(!$?){exit 1}'
+  portable_source:
+    name: Pin source for complete portable preflight
+    uses: ./.github/workflows/source-pin-component.yml
+    secrets: inherit
+  portable_preflight:
+    name: Complete portable Doctor before release builds
+    needs: portable_source
+    uses: ./.github/workflows/doctor.yml
+    with:
+      capsule: ${{ needs.portable_source.outputs.capsule }}
+      platform: Portable
+    secrets: inherit
+
+  handoff_identity_diagnostic:
+    name: Read-only signed Launcher handoff identity
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.handoff_run_id != '' && inputs.handoff_workspace_sha != '' }}
+    permissions:
+      contents: read
+      actions: read
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        path: recipe
+        persist-credentials: false
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: false
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: ${{ inputs.handoff_workspace_sha }}
+        path: source
+        fetch-depth: 3
+        persist-credentials: false
+        sparse-checkout: |
+          /Distribution/SrcVersion.ini
+          /Distribution/tools/opaque_paths.py
+          /etc/build/workspace-common.ps1
+          /Launcher/lib/x64/Release/local-machine-v1/
+        sparse-checkout-cone-mode: false
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+    - uses: actions/download-artifact@v4
+      with:
+        name: kyron-workspace-exe-${{ inputs.handoff_run_id }}-1
+        run-id: ${{ inputs.handoff_run_id }}
+        github-token: ${{ github.token }}
+        path: handoff/exe
+    - name: Inspect authenticated executable identity without publishing
+      shell: pwsh
+      env:
+        KYRON_HANDOFF_SECRET: ${{ secrets[vars.MIX_KEY_NAME] }}
+        INPUT_SHA: ${{ inputs.handoff_workspace_sha }}
+        INPUT_RUN: ${{ inputs.handoff_run_id }}
+      run: |
+        $ErrorActionPreference='Stop'
+        if($env:INPUT_SHA -cnotmatch '^[0-9a-f]{40}$' -or $env:INPUT_RUN -notmatch '^[1-9][0-9]{7,}$'){throw 'Diagnostic input rejected'}
+        $head=(& git -C source rev-parse HEAD).Trim().ToLowerInvariant()
+        if($head -cne $env:INPUT_SHA){throw 'Diagnostic immutable source mismatch'}
+        $files=@(Get-ChildItem -LiteralPath handoff/exe -File -Recurse -Filter '*.bin')
+        if($files.Count -ne 1){throw 'Encrypted executable handoff inventory rejected'}
+        $opened=Join-Path $env:RUNNER_TEMP 'read-only-exe-handoff'
+        & ./recipe/.github/workflows/workspace-handoff.ps1 -Mode unpack -Lane exe -PantryRoot (Join-Path $PWD.Path 'source/Distribution') -WorkspaceSha $head -PantrySha $head -Secret $env:KYRON_HANDOFF_SECRET -InputPath $files[0].FullName -OutputRoot $opened
+        if(!$?){throw 'Authenticated handoff unpack rejected'}
+        $artifact=Join-Path $opened 'source/Launcher/lib/x64/Release/local-machine-v1'
+        $metaPath=Join-Path $artifact 'Launcher.build.json';$exe=Join-Path $artifact 'Launcher.exe'
+        if(!(Test-Path $metaPath)-or!(Test-Path $exe)){throw 'Handoff Launcher binary or metadata missing'}
+        $m=Get-Content -LiteralPath $metaPath -Raw|ConvertFrom-Json
+        . ./source/etc/build/workspace-common.ps1
+        $plan=Get-WorkspacePlanRevision (Join-Path $PWD.Path 'source') launcher
+        $record=([string]$m.workspace_commit).ToLowerInvariant()
+        $sha=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+        $valid=$record-ceq$plan.Substring(0,12) -or $record-ceq$head.Substring(0,12)
+        Write-Host "[LAUNCHER/HANDOFF/DIAG] source_head=$head source_plan=$plan compiled_commit=$record size=$((Get-Item $exe).Length) sha256=$sha metadata_matches_file=$($sha-ceq([string]$m.exe_sha256).ToLowerInvariant()) source_identity_admitted=$valid"
+        if($sha-cne([string]$m.exe_sha256).ToLowerInvariant()){throw 'Handoff executable metadata SHA does not match actual bytes'}

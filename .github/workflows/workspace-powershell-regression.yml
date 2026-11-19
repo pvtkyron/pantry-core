@@ -1,0 +1,357 @@
+name: Workspace PowerShell regression gate
+'on':
+  workflow_dispatch: null
+  repository_dispatch:
+    types:
+    - component-kyronlink
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/workspace-powershell-regression.yml
+    - .github/workflows/workspace-handoff.ps1
+    - .github/tests/test_workspace_handoff.py
+    - .github/scripts/Invoke-HostedReleaseStep.ps1
+    - .github/tests/test_hosted_supersession.py
+    - .github/scripts/restore_prepared_delivery.py
+    - .github/scripts/Seal-PreparedDelivery.ps1
+    - .github/tests/test_prepared_delivery.py
+permissions:
+  contents: read
+concurrency:
+  group: kyron-workspace-powershell-gate-${{ github.event_name == 'repository_dispatch' && 'android' || 'all' }}${{ github.event_name == 'repository_dispatch' && (github.event.client_payload.source_router == true || github.event.client_payload.pantry_router == true || github.event.client_payload.pantry_delta == true) && '-deferred' || '' }}
+  cancel-in-progress: true
+jobs:
+  contracts:
+    if: ${{ (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && (github.event_name != 'repository_dispatch')) && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta != true)) }}
+    name: Private Workspace PowerShell contracts
+    runs-on: windows-2025
+    timeout-minutes: 18
+    steps:
+    - name: Open Pantry Core automation recipe
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        path: recipe
+        fetch-depth: 1
+        persist-credentials: false
+        show-progress: false
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: false
+    - name: Enable Git long paths before checkout
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        & git config --global core.longpaths true
+        if($LASTEXITCODE-ne0){throw 'Git long path configuration failed'}
+        Write-Host '[WORKSPACE/GATE][GIT-PATHS][OK]'
+    - name: Mask private checkout identity
+      shell: pwsh
+      env:
+        WORKSPACE_REPO: ${{ secrets.MIX_REPO }}
+      run: |
+        if([string]::IsNullOrWhiteSpace($env:WORKSPACE_REPO)){throw 'Private source configuration unavailable'}
+        Write-Host "::add-mask::$env:WORKSPACE_REPO"
+    - name: Check out private Workspace sources
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: ${{ 'main' }}
+        path: workspace
+        fetch-depth: 1
+        fetch-tags: false
+        lfs: false
+        persist-credentials: false
+        show-progress: false
+    - name: Verify Pantry Core owns Actions and private source owns no workflows
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        if($env:GITHUB_REPOSITORY -ne 'pvtkyron/pantry-core'){throw 'Actions owner rejected'}
+        $dir=Join-Path $PWD.Path 'workspace/.github/workflows'
+        if(Test-Path -LiteralPath $dir){$items=@(Get-ChildItem -LiteralPath $dir -File|Where-Object{$_.Extension -in '.yml','.yaml'});if($items.Count){throw 'Private source must not own Actions workflows'}}
+        Write-Host '[WORKSPACE/GATE][ACTIONS][OK] Pantry Core owns execution'
+    - name: Run PowerShell safety preflight
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        Push-Location 'workspace'
+        try{
+          $ps=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+          & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File 'etc/build/assert-powershell-safety.ps1' -Root $PWD.Path
+          if($LASTEXITCODE){throw 'PowerShell source safety rejected'}
+          Write-Host '[WORKSPACE/GATE][SOURCE][OK]'
+        }finally{Pop-Location}
+    - name: Run PowerShell regression contracts
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        Push-Location 'workspace'
+        try{
+          $ps=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+          & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File 'etc/build/test-powershell-safety.ps1'
+          if($LASTEXITCODE){throw 'PowerShell regression contracts rejected'}
+          Write-Host '[WORKSPACE/GATE][REGRESSION][OK]'
+        }finally{Pop-Location}
+    - name: Verify bounded native compiler, cache and failure handling
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $legacy=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+        $tool=Get-Command clang++.exe -CommandType Application -ErrorAction SilentlyContinue|Select-Object -First 1
+        $compiler=if($env:CXX_PATH){$env:CXX_PATH}elseif($tool){$tool.Source}else{Join-Path $env:ProgramFiles 'LLVM/bin/clang++.exe'}
+        if(!(Test-Path -LiteralPath $compiler -PathType Leaf)){throw 'Windows clang++ unavailable for bounded compiler regression'}
+        $env:CXX_PATH=[IO.Path]::GetFullPath($compiler)
+        $test=Join-Path $PWD.Path 'workspace/etc/devtools/tests/Test-BoundedNativeCompile.ps1'
+        Write-Host '[WORKSPACE/GATE][SHELL] Windows PowerShell 5.1'
+        & $legacy -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -CompilerPath $env:CXX_PATH
+        if($LASTEXITCODE-ne0){throw "PowerShell 5.1 bounded compiler regression rejected rc=$LASTEXITCODE"}
+        Write-Host '[WORKSPACE/GATE][NATIVE-COMPILE][OK] maintained real-process regression passed'
+    - name: Verify obj-only cleanup guard
+      shell: powershell
+      run: |
+        $ErrorActionPreference='Stop'
+        $Root=Join-Path $PWD.Path 'workspace'
+        $scriptPath=Join-Path $Root 'etc/devtools/BuildWindowsLlvm.ps1'
+        $tokens=$null;$parseErrors=$null
+        $ast=[Management.Automation.Language.Parser]::ParseFile($scriptPath,[ref]$tokens,[ref]$parseErrors)
+        if(@($parseErrors).Count){throw "LLVM source parser failed: $($parseErrors[0].Message)"}
+        $found=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Reset-Dir'},$true))
+        if($found.Count -ne 1){throw 'Guarded Reset-Dir implementation missing'}
+        $resetSource=$found[0].Extent.Text
+        if($resetSource -notmatch '(?i)\bthrow\b' -or $resetSource -notmatch 'ReparsePoint' -or $resetSource -notmatch '(?i)obj' -or $resetSource -notmatch 'EnumerateFileSystemEntries'){throw 'Reset-Dir lacks owned-obj and recursive reparse guards; refusing destructive probe'}
+        . ([scriptblock]::Create($found[0].Extent.Text))
+        $safe=Join-Path $Root ('Launcher/obj/__KyronResetGuard_'+$env:GITHUB_RUN_ID)
+        New-Item -ItemType Directory -Path $safe -Force|Out-Null
+        $marker=Join-Path $safe 'marker.txt';[IO.File]::WriteAllText($marker,'owned-fixture')
+        Reset-Dir $safe
+        if(Test-Path -LiteralPath $marker){throw 'Owned obj directory was not reset'}
+        $outside=Join-Path $env:RUNNER_TEMP ('KyronResetGuardOutside_'+$env:GITHUB_RUN_ID)
+        New-Item -ItemType Directory -Path $outside -Force|Out-Null
+        $protected=Join-Path $outside 'must-survive.txt';[IO.File]::WriteAllText($protected,'protected')
+        $blocked=$false
+        try{Reset-Dir $outside}catch{$blocked=$true}
+        if(!$blocked -or !(Test-Path -LiteralPath $protected -PathType Leaf)){throw 'Outside-obj directory was not protected'}
+        $link=Join-Path $safe 'junction'
+        if(Test-Path -LiteralPath $link){throw 'Unexpected junction already exists'}
+        New-Item -ItemType Junction -Path $link -Target $outside|Out-Null
+        try{
+          $blocked=$false
+          try{Reset-Dir (Join-Path $link 'nested')}catch{$blocked=$true}
+          if(!$blocked -or !(Test-Path -LiteralPath $protected -PathType Leaf)){throw 'Junction traversal was not protected'}
+        }finally{
+          if(Test-Path -LiteralPath $link){[IO.Directory]::Delete($link,$false)}
+        }
+        $nested=Join-Path $safe 'nested'
+        New-Item -ItemType Directory -Path $nested -Force|Out-Null
+        $embedded=Join-Path $nested 'junction'
+        New-Item -ItemType Junction -Path $embedded -Target $outside|Out-Null
+        try{
+          $blocked=$false
+          try{Reset-Dir $safe}catch{$blocked=$true}
+          if(!$blocked -or !(Test-Path -LiteralPath $protected -PathType Leaf)){throw 'Nested ReparsePoint inside owned obj tree was not protected'}
+        }finally{
+          if(Test-Path -LiteralPath $embedded){[IO.Directory]::Delete($embedded,$false)}
+        }
+        Write-Host '[WORKSPACE/GATE][RESET-GUARD][OK] exact obj-only deletion, outside, ancestor and nested junction protected'
+    - name: Test PowerShell handoff crypto across Windows PowerShell 5.1
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $ps=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+        $env:KYRON_TEST_PWSH=$ps
+        python -m pip install --disable-pip-version-check --no-input 'cryptography==46.0.4'
+        if($LASTEXITCODE-ne0){throw 'PowerShell handoff regression dependency installation failed'}
+        python 'recipe/.github/tests/test_workspace_handoff.py' -v
+        if($LASTEXITCODE-ne0){throw 'PowerShell handoff crypto regression rejected'}
+  supersession:
+    name: Quiet hosted supersession · Windows PowerShell 5.1
+    if: ${{ (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && github.event_name != 'repository_dispatch') && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta != true)) }}
+    permissions:
+      contents: read
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+    - name: Open supersession recipe and fixtures
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        path: recipe
+        fetch-depth: 1
+        persist-credentials: false
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: false
+    - name: Open only the private source admission owner and fixtures
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: main
+        path: workspace
+        fetch-depth: 1
+        persist-credentials: false
+        show-progress: false
+        sparse-checkout: |
+          /etc/build/workspace-common.ps1
+          /etc/devtools/tests/Test-HostedNativeSource.ps1
+        sparse-checkout-cone-mode: false
+    - name: Prepare Python for transport fixtures
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Verify source admission on PowerShell 7
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        & pwsh -NoLogo -NoProfile -NonInteractive -File 'workspace/etc/devtools/tests/Test-HostedNativeSource.ps1'
+        if($LASTEXITCODE-ne0){throw 'PowerShell 7 source identity and supersession fixture rejected'}
+    - name: Verify authenticated source supersession and clean source admission
+      shell: pwsh
+      run: |
+        $legacy=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+        & $legacy -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'workspace/etc/devtools/tests/Test-HostedNativeSource.ps1'
+        if($LASTEXITCODE-ne0){throw 'Hosted source identity and supersession fixture rejected'}
+    - name: Verify quiet cancellation preserves real failures
+      shell: pwsh
+      run: |
+        $env:KYRON_TEST_PWSH=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+        python -m pip install --disable-pip-version-check --no-input PyYAML==6.0.2
+        if($LASTEXITCODE-ne0){throw 'Hosted workflow fixture dependency installation failed'}
+        python 'recipe/.github/tests/test_hosted_supersession.py' -v
+        if($LASTEXITCODE-ne0){throw 'Hosted source supersession regression rejected'}
+  android:
+    name: Kyron Link Java, D8, Mundo and network behavior
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - name: Install .NET 8 for production proxy network fixtures
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+    - name: Validate private source selection
+      shell: bash
+      env:
+        WORKSPACE_REPO: ${{ secrets.MIX_REPO }}
+        WORKSPACE_SHA: ${{ github.event.client_payload.workspace_sha }}
+      run: |
+        set -euo pipefail
+        [[ -n "$WORKSPACE_REPO" ]] || { echo '::error::Private Workspace configuration unavailable'; exit 1; }
+        echo "::add-mask::$WORKSPACE_REPO"
+        echo "KYRON_MUNDO_DEPENDENCIES=$RUNNER_TEMP/kyronlink-mundo-deps" >> "$GITHUB_ENV"
+        echo "KYRON_SMALI_JAR=$RUNNER_TEMP/kyronlink-smali/smali.jar" >> "$GITHUB_ENV"
+        if [[ "$GITHUB_EVENT_NAME" == repository_dispatch && ! "$WORKSPACE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+          echo '::error::Kyron Link dispatch requires an exact Workspace revision'
+          exit 1
+        fi
+    - name: Open exact private Workspace source
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: ${{ github.event.client_payload.workspace_sha || 'main' }}
+        path: workspace
+        fetch-depth: 1
+        fetch-tags: false
+        persist-credentials: false
+        show-progress: false
+    - name: Verify checked-out source revision
+      shell: bash
+      env:
+        WORKSPACE_SHA: ${{ github.event.client_payload.workspace_sha }}
+      run: |
+        set -euo pipefail
+        actual="$(git -C workspace rev-parse HEAD)"
+        [[ "$actual" =~ ^[0-9a-f]{40}$ ]] || exit 1
+        [[ -z "$WORKSPACE_SHA" || "$actual" == "$WORKSPACE_SHA" ]] || { echo '::error::Kyron Link source pin changed'; exit 1; }
+        echo "::add-mask::$actual"
+        echo '[KYRONLINK/SOURCE][OK] exact checked-out revision retained'
+    - name: Prepare Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+    - name: Prepare Java 21 for Android 16 source
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: 21.0.12+101.0.LTS
+    - name: Ensure API 35 and build-tools 35
+      shell: bash
+      run: |
+        set -euo pipefail
+        manager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+        "$manager" --sdk_root="$ANDROID_HOME" 'platforms;android-35' 'build-tools;35.0.0'
+        test -f "$ANDROID_HOME/platforms/android-35/android.jar"
+        test -f "$ANDROID_HOME/build-tools/35.0.0/lib/d8.jar"
+        test -x "$ANDROID_HOME/build-tools/35.0.0/aapt2"
+    - name: Restore locked compile-only dependencies
+      uses: actions/cache@v6.1.0
+      with:
+        path: |
+          ${{ env.KYRON_MUNDO_DEPENDENCIES }}
+          ${{ runner.temp }}/kyronlink-smali
+        key: kyronlink-managed-v1-${{ runner.os }}-${{ hashFiles('workspace/KyronLink/jni/container/source-build.lock.json',
+          'workspace/etc/build/toolchains.lock.json') }}
+    - name: Verify locked dependency bytes with the build owner
+      shell: python
+      run: |
+        import json, os, sys
+        from pathlib import Path
+        project = Path('workspace/KyronLink').resolve()
+        sys.path.insert(0, str(project))
+        from build_mundo_sources import prepare_pinned_artifacts
+        lock = json.loads((project / 'jni/container/source-build.lock.json').read_text())
+        prepare_pinned_artifacts(Path(os.environ['KYRON_MUNDO_DEPENDENCIES']), lock['dependencies'], fetch=True)
+        tools = json.loads((project.parent / 'etc/build/toolchains.lock.json').read_text())
+        smali = {'url': tools['smali']['download'], 'sha256': tools['smali']['sha256']}
+        prepare_pinned_artifacts(Path(os.environ['KYRON_SMALI_JAR']).parent, {'smali.jar': smali}, fetch=True)
+        print('[KYRONLINK/DEPENDENCIES][OK] every cached or downloaded artifact matched its original SHA256')
+    - name: Run actual Android builds and network behavior without skips
+      shell: python
+      run: |
+        import unittest
+        suite = unittest.defaultTestLoader.discover('workspace/KyronLink/tests')
+        result = unittest.TextTestRunner(verbosity=2).run(suite)
+        if result.skipped:
+            raise SystemExit('Kyron Link managed validation must execute every check; skipped tests are not success')
+        if not result.testsRun or not result.wasSuccessful():
+            raise SystemExit(1)
+        print(f'[KYRONLINK/ANDROID][OK] {result.testsRun} checks executed; zero skipped')
+    - name: Prepare exact KyronLink source validation receipt
+      if: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.workspace_sha != '' }}
+      shell: bash
+      env:
+        KYRONLINK_SHA: ${{ github.event.client_payload.workspace_sha }}
+      run: |
+        set -euo pipefail
+        [[ "$KYRONLINK_SHA" =~ ^[0-9a-f]{40}$ && "$(git -C workspace rev-parse HEAD)" == "$KYRONLINK_SHA" ]] || { echo '::error::KyronLink validated source moved'; exit 1; }
+        mkdir -p "$RUNNER_TEMP/kyronlink-receipt"
+        jq -n --arg sha "$KYRONLINK_SHA" --argjson run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" '{schema:1,workspace_sha:$sha,producer_run_id:$run,producer_attempt:$attempt,validated:true,published:false}' > "$RUNNER_TEMP/kyronlink-receipt/kyronlink-validation.json"
+        echo "[KYRONLINK/RECEIPT][READY] source=$KYRONLINK_SHA; validated, not published"
+    - name: Preserve small KyronLink validation receipt
+      if: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.workspace_sha != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: kyronlink-validation-${{ github.event.client_payload.workspace_sha }}
+        path: ${{ runner.temp }}/kyronlink-receipt/kyronlink-validation.json
+        if-no-files-found: error
+        retention-days: 60
+        compression-level: 0
+    if: ${{ (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main') && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta != true)) }}
+  prepared-delivery:
+    name: Authenticated generated delivery regression
+    if: ${{ (github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && github.event_name != 'repository_dispatch') && (github.event_name != 'repository_dispatch' || (github.event.client_payload.source_router != true && github.event.client_payload.pantry_router != true && github.event.client_payload.pantry_delta != true)) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        sparse-checkout: .github
+        persist-credentials: false
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Install authenticated envelope dependency
+      run: python -m pip install --disable-pip-version-check cryptography==46.0.2
+    - name: Verify authentication provenance traversal and preservation
+      run: python .github/tests/test_prepared_delivery.py

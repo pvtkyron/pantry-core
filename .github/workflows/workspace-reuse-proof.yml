@@ -1,0 +1,48 @@
+name: KYRON compiler reuse proof (read-only)
+'on':
+  workflow_dispatch:
+    inputs:
+      expect_java_hit:
+        type: boolean
+        default: false
+      expect_exe_hit:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+jobs:
+  sources:
+    name: Pin signed private source without compilation
+    uses: ./.github/workflows/source-pin.yml
+    with:
+      require_native_delivery: true
+    secrets: inherit
+  reuse:
+    name: Verify independent Java and EXE handoffs
+    needs: sources
+    if: ${{ needs.sources.result == 'success' && needs.sources.outputs.delivery_pending != 'true' }}
+    uses: ./.github/workflows/workspace-reuse.yml
+    with:
+      capsule: ${{ needs.sources.outputs.capsule }}
+      include_launcher: true
+      runtime_channel: both
+    secrets: inherit
+  report:
+    name: Assert compiler reuse proof without any build
+    needs: [sources, reuse]
+    if: ${{ needs.sources.result == 'success' && needs.reuse.result == 'success' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Print boolean compiler reuse result
+        env:
+          JAVA_HIT: ${{ needs.reuse.outputs.java_run_id != '' }}
+          EXE_HIT: ${{ needs.reuse.outputs.exe_run_id != '' }}
+          EXPECT_JAVA: ${{ inputs.expect_java_hit }}
+          EXPECT_EXE: ${{ inputs.expect_exe_hit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[KYRON/REUSE/PROOF] java_reused=$JAVA_HIT exe_reused=$EXE_HIT read_only=true compiled=false published=false"
+          if [[ "$EXPECT_JAVA" == true && "$JAVA_HIT" != true ]]; then echo "::error::Expected signed Java cache reuse failed"; exit 1; fi
+          if [[ "$EXPECT_EXE" == true && "$EXE_HIT" != true ]]; then echo "::error::Expected signed EXE cache reuse failed"; exit 1; fi

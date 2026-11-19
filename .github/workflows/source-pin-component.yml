@@ -1,0 +1,159 @@
+name: Component Source Pin
+'on':
+  workflow_call:
+    inputs:
+      require_native_delivery:
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      delivery_pending:
+        description: Source projection or approved native delivery is pending
+        value: ${{ jobs.pin.outputs.delivery_pending }}
+      capsule:
+        description: Encrypted private source state for component lanes
+        value: ${{ jobs.pin.outputs.capsule }}
+  workflow_dispatch:
+    inputs: {}
+permissions:
+  contents: read
+jobs:
+  pin:
+    name: Pin component source refs without heavy checkouts
+    runs-on: ubuntu-24.04
+    outputs:
+      delivery_pending: ${{ steps.contract.outputs.pending == 'true' || steps.native.outputs.pending == 'true' }}
+      capsule: ${{ steps.seal.outputs.capsule }}
+    steps:
+    - name: Open Pantry Core automation recipe
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        path: recipe
+        fetch-depth: 1
+        persist-credentials: false
+        show-progress: false
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: false
+    - name: Mask configured private repositories
+      shell: pwsh
+      env:
+        WORKSPACE_REPO: ${{ secrets.MIX_REPO }}
+        PANTRY_REPO: ${{ secrets.MIX_REPO }}
+      run: |
+        foreach($value in @($env:WORKSPACE_REPO,$env:PANTRY_REPO)){
+          if([string]::IsNullOrWhiteSpace($value)){throw 'private source configuration unavailable'}
+          Write-Host "::add-mask::$value"
+        }
+    - name: Validate requested Workspace revision
+      shell: pwsh
+      env:
+        WORKSPACE_SHA: ${{ github.event.client_payload.workspace_sha }}
+      run: |
+        $ErrorActionPreference='Stop'
+        if($env:WORKSPACE_SHA -and $env:WORKSPACE_SHA -cnotmatch '\A[0-9a-f]{40}\z'){
+          throw 'Requested Workspace revision must be an exact lowercase Git SHA'
+        }
+    - name: Open Workspace registry only
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: ${{ github.event.client_payload.workspace_sha || 'main' }}
+        path: workspace
+        fetch-depth: 1
+        fetch-tags: false
+        persist-credentials: ${{ inputs.require_native_delivery }}
+        show-progress: false
+        sparse-checkout: |
+          /etc/config/kyron/private-projects.json
+          /etc/build/workspace-common.ps1
+          /Distribution/SrcVersion.ini
+          /Shared/pantry_contract.hpp
+          /Distribution/tools/sync_consumer_contract.py
+          /Distribution/tools/sync_pantry_contract.py
+        sparse-checkout-cone-mode: false
+    - name: Read private project registry
+      id: registry
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $path=Join-Path $PWD.Path 'workspace/etc/config/kyron/private-projects.json'
+        if(!(Test-Path -LiteralPath $path -PathType Leaf)){throw 'private project registry unavailable'}
+        $r=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json
+        if([int]$r.schema-ne1){throw 'private project registry schema rejected'}
+        $sdk=([string]$r.projects.sdk).Trim();$web=([string]$r.projects.web).Trim()
+        foreach($value in @($sdk,$web)){
+          if($value-notmatch'^[^/\s]+/[^/\s]+$'){throw 'private project registry entry rejected'}
+          Write-Host "::add-mask::$value"
+        }
+        "sdk_repo=$sdk" >> $env:GITHUB_OUTPUT
+        "web_repo=$web" >> $env:GITHUB_OUTPUT
+    - name: Resolve private source refs without content checkout
+      id: state
+      shell: pwsh
+      env:
+        MIX_TOKEN: ${{ secrets[vars.MIX_KEY_NAME] }}
+        WORKSPACE_REPO: ${{ secrets.MIX_REPO }}
+        PANTRY_REPO: ${{ secrets.MIX_REPO }}
+        SDK_REPO: ${{ steps.registry.outputs.sdk_repo }}
+        WEB_REPO: ${{ steps.registry.outputs.web_repo }}
+      run: |
+        $ErrorActionPreference='Stop'
+        function Head([string]$Repo,[string]$Token){
+          $Repo=($Repo+'').Trim();$Token=($Token+'').Trim()
+          $Token=-join @($Token.ToCharArray()|Where-Object{[int]$_ -ge 33 -and [int]$_ -le 126})
+          if([string]::IsNullOrWhiteSpace($Repo)-or[string]::IsNullOrWhiteSpace($Token)){throw 'private source ref input missing'}
+          $headers=@{
+            Authorization="Bearer $Token"
+            Accept='application/vnd.github+json'
+            'X-GitHub-Api-Version'='2022-11-28'
+            'User-Agent'='kyron-component-source-pin'
+          }
+          $row=Invoke-RestMethod -Method Get -Uri ("https://api.github.com/repos/{0}/commits/main" -f $Repo) -Headers $headers -TimeoutSec 30
+          $sha=([string]$row.sha).Trim().ToLowerInvariant()
+          if($sha-notmatch'^[0-9a-f]{40}$'){throw 'private source ref rejected'}
+          return $sha
+        }
+        $workspaceRef=(& git -C workspace rev-parse HEAD).Trim().ToLowerInvariant()
+        if($workspaceRef-notmatch'^[0-9a-f]{40}$'){throw 'workspace source ref rejected'}
+        $pantryRef=$workspaceRef
+        $sdkRef=Head $env:SDK_REPO $env:MIX_TOKEN
+        $webRef=Head $env:WEB_REPO $env:MIX_TOKEN
+        foreach($value in @($workspaceRef,$pantryRef,$sdkRef,$webRef)){Write-Host "::add-mask::$value"}
+        $state=[ordered]@{
+          schema=1
+          workspace=[ordered]@{repo=$env:WORKSPACE_REPO;ref=$workspaceRef}
+          pantry=[ordered]@{repo=$env:WORKSPACE_REPO;ref=$workspaceRef;path='Distribution'}
+          sdk=[ordered]@{repo=$env:SDK_REPO;ref=$sdkRef}
+          web=[ordered]@{repo=$env:WEB_REPO;ref=$webRef}
+        }
+        $payload=$state|ConvertTo-Json -Compress -Depth 5
+        Write-Host "::add-mask::$payload"
+        "payload=$payload" >> $env:GITHUB_OUTPUT
+        Write-Host '[COMPONENT-SOURCES][PIN][OK] refs captured without heavy checkouts'
+    - name: Verify source contract quietly for release consumers
+      id: contract
+      if: ${{ inputs.require_native_delivery }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 ./recipe/.github/tests/test_source_contract_readiness.py
+        python3 ./recipe/.github/scripts/verify_source_contract.py --workspace ./workspace
+    - name: Check approved native delivery readiness
+      id: native
+      if: ${{ inputs.require_native_delivery && steps.contract.outputs.pending != 'true' }}
+      shell: pwsh
+      env:
+        PRIVATE_SOURCE_REPOSITORY: ${{ secrets.MIX_REPO }}
+      run: |
+        & ./recipe/.github/scripts/Restore-ApprovedNativeRuntime.ps1 -SourceRoot ./workspace -ExpectedRepository $env:PRIVATE_SOURCE_REPOSITORY -CheckOnly
+        if(!$?){throw 'Approved native delivery readiness check failed'}
+    - name: Seal private source state
+      id: seal
+      uses: ./recipe/.github/actions/private-capsule
+      with:
+        mode: seal
+        key: ${{ secrets[vars.MIX_KEY_NAME] }}
+        payload: ${{ steps.state.outputs.payload }}
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' }}

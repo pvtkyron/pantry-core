@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "lanes": {
+    "java": [
+      "Distribution/src",
+      "Distribution/tools",
+      "Distribution/security",
+      "Distribution/auth",
+      "Distribution/SrcVersion.ini",
+      "Shared",
+      "etc/build",
+      "etc/security/signing",
+      "etc/publishing/Preflight-PantryRelease.ps1",
+      "etc/publishing/Prepare-PantryCore.ps1",
+      "etc/publishing/Run-PantryRelease.ps1",
+      "etc/publishing/Stage-PantryInputs.ps1",
+      "etc/publishing/Update-PantryArtifacts.ps1",
+      "etc/publishing/prepare_pantry_core.py",
+      "Directory.Build.props"
+    ],
+    "exe": [
+      "Launcher",
+      "Shared",
+      "Distribution/src",
+      "Distribution/tools",
+      "Distribution/security",
+      "Distribution/SrcVersion.ini",
+      "etc/build",
+      "etc/security/signing",
+      "etc/devtools/BakeDoctor.ps1",
+      "etc/devtools/BuildWindowsSlice.ps1",
+      "etc/devtools/BuildWindowsLlvm.ps1",
+      "etc/devtools/Build-KyronLauncher.ps1",
+      "etc/devtools/ValidatePantryContract.ps1",
+      "etc/devtools/ValidatePantryContract.impl.ps1",
+      "etc/devtools/GenerateSignerPin.ps1",
+      "etc/devtools/KyronPackTool.cpp",
+      "etc/devtools/Add-CetCompatMetadata.ps1",
+      "etc/commands/BUILD_WINDOWS_DELIVERY.bat",
+      "Kyron.sln",
+      "Directory.Build.props",
+      "etc/devtools/KyronReleaseGate.py",
+      "etc/devtools/test_kyron_release_gate_identity.py",
+      "etc/devtools/ToolchainEnv.cmd",
+      "etc/publishing/Initialize-LocalPantrySigner.ps1",
+      "etc/publishing/Assert-FrozenBootstrap.ps1",
+      ".gitattributes"
+    ]
+  }
+}
