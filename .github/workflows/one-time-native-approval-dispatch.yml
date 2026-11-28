@@ -1,0 +1,52 @@
+name: One-time source-bound Native approval dispatcher
+'on':
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-time-native-approval-dispatch.yml
+permissions:
+  actions: write
+  contents: read
+jobs:
+  dispatch:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch exact signed candidate approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$COMMIT_MESSAGE" != "ci: dispatch exact native approval" ]]; then echo '[NATIVE/APPROVE/DISPATCH][SKIP] not the one-time trigger commit'; exit 0; fi
+          payload='{"ref":"main","inputs":{"source_sha":"e0b74270f337ade3fa268c68919c1d52cbfa3652","signed_run_id":"42422163563","signed_attempt":"1","approve":true}}'
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --header "Content-Type: application/json" \
+            --data "${payload}" \
+            https://api.github.com/repos/pvtkyron/pantry-core/actions/workflows/native-approve.yml/dispatches
+          echo "[NATIVE/APPROVE/DISPATCH][OK] source=e0b74270 run=42422163563"
+  dispatch_full_kyron_release_20261109:
+    if: "${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'ci: dispatch full KYRON release 7e4da72432' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Request official signed native and launcher full release
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        curl --fail-with-body --silent --show-error \
+          --request POST \
+          --header "Authorization: Bearer ${GH_TOKEN}" \
+          --header "Accept: application/vnd.github+json" \
+          --header "X-GitHub-Api-Version: 2022-11-28" \
+          --header "Content-Type: application/json" \
+          --data '{"ref":"main","inputs":{"request":"","payload":"{}"}}' \
+          https://api.github.com/repos/pvtkyron/pantry-core/actions/workflows/patisserie.yml/dispatches
+        echo '[KYRON][FULL/REQUESTED] source 7e4da72432; official signed pipeline dispatched'

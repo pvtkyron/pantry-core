@@ -1,0 +1,29 @@
+name: Pantry Component Router
+'on':
+  workflow_dispatch: null
+permissions:
+  contents: read
+concurrency:
+  group: pantry-manual-refresh
+  cancel-in-progress: false
+jobs:
+  watch:
+    name: Request one full refresh
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: write
+      actions: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+    - name: Request one full refresh
+      id: refresh
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        [[ "$GITHUB_REPOSITORY" == 'pvtkyron/pantry-core' && "$GITHUB_REF" == 'refs/heads/main' ]] || { echo '::error::Manual refresh requires canonical Pantry Core/main'; exit 1; }
+        jq -n '{event_type:"workspace-release",client_payload:{manual_refresh:true}}' \
+          | gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" --input - >/dev/null
+        echo '[ROUTER][REFRESH/DISPATCHED] one full refresh requested; automatic releases remain on the six-hour cycle'

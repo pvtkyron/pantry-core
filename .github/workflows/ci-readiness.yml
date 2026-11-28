@@ -1,0 +1,80 @@
+name: Pantry Core release readiness
+'on':
+  workflow_dispatch:
+    inputs:
+      require_publish_access:
+        description: Verify that the configured CI credential can publish Pantry Core
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      require_publish_access:
+        type: boolean
+        default: true
+permissions:
+  contents: read
+jobs:
+  readiness:
+    name: Verify private CI bindings without exposing secrets
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Verify release credentials and destination access
+      shell: python
+      env:
+        MIX_TOKEN: ${{ secrets[vars.MIX_KEY_NAME] }}
+        MIX_REPO: ${{ secrets.MIX_REPO }}
+        KYRON_SIGNER_PFX: ${{ secrets.KYRON_CODESIGN_PFX_B64 }}
+        KYRON_SIGNER_PASSWORD: ${{ secrets.KYRON_CODESIGN_PASSWORD }}
+        BOOTSTRAP_PRIVATE: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM }}
+        BOOTSTRAP_PUBLIC: ${{ secrets.KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM }}
+        CONTENT_PRIVATE: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM }}
+        CONTENT_PUBLIC: ${{ secrets.KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM }}
+        REQUIRE_PUBLISH_ACCESS: ${{ inputs.require_publish_access }}
+        PUBLISH_TOKEN: ${{ secrets[vars.FILL_KEY_NAME] }}
+      run: |
+        import base64, json, os, urllib.error, urllib.request
+        if os.environ['GITHUB_REPOSITORY'].lower() != 'pvtkyron/pantry-core' or os.environ['GITHUB_REF'] != 'refs/heads/main':
+            raise SystemExit('Release readiness requires the canonical Pantry Core/main')
+        required = {
+            'MIX_REPO': 'MIX_REPO',
+            'MIX_TOKEN': 'the secret selected by MIX_KEY_NAME',
+            'PUBLISH_TOKEN': 'the secret selected by FILL_KEY_NAME',
+            'KYRON_SIGNER_PFX': 'KYRON_CODESIGN_PFX_B64',
+            'KYRON_SIGNER_PASSWORD': 'KYRON_CODESIGN_PASSWORD',
+            'BOOTSTRAP_PRIVATE': 'KYRON_PANTRY_LOCAL_BOOTSTRAP_PRIVATE_PEM',
+            'BOOTSTRAP_PUBLIC': 'KYRON_PANTRY_LOCAL_BOOTSTRAP_PUBLIC_PEM',
+            'CONTENT_PRIVATE': 'KYRON_PANTRY_LOCAL_CONTENT_PRIVATE_PEM',
+            'CONTENT_PUBLIC': 'KYRON_PANTRY_LOCAL_CONTENT_PUBLIC_PEM',
+        }
+        missing = [name for variable, name in required.items() if not os.environ.get(variable, '').strip()]
+        if missing:
+            raise SystemExit('Missing private CI bindings: ' + ', '.join(missing))
+        if os.environ['MIX_REPO'].strip().lower() != 'pvtkyron/workspace':
+            raise SystemExit('MIX_REPO must identify the canonical private Workspace')
+        try:
+            certificate = base64.b64decode(os.environ['KYRON_SIGNER_PFX'], validate=True)
+        except ValueError:
+            raise SystemExit('Canonical signer binding is not valid base64')
+        if not 1024 <= len(certificate) <= 1024 * 1024:
+            raise SystemExit('Canonical signer binding has an invalid size')
+        for target in ('Workspace', 'pantry-core'):
+            token = os.environ['MIX_TOKEN' if target == 'Workspace' else 'PUBLISH_TOKEN'].strip().lstrip('\ufeff').strip()
+            if not token or any(ord(c) < 33 or ord(c) > 126 for c in token):
+                raise SystemExit('Configured CI credential has an invalid format: ' + target)
+            request = urllib.request.Request(
+                os.environ['GITHUB_API_URL'] + '/repos/pvtkyron/' + target,
+                headers={'Authorization': 'Bearer ' + token,
+                         'Accept': 'application/vnd.github+json',
+                         'X-GitHub-Api-Version': '2022-11-28'},
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    repository = json.load(response)
+            except urllib.error.HTTPError as error:
+                raise SystemExit('Configured CI credential cannot access ' + target + ': HTTP ' + str(error.code))
+            except urllib.error.URLError:
+                raise SystemExit('Repository capability check failed to connect: ' + target)
+            if os.environ['REQUIRE_PUBLISH_ACCESS'].lower() == 'true' and not repository.get('permissions', {}).get('push'):
+                raise SystemExit('Configured CI credential lacks publication access: ' + target)
+        print('[PANTRY-CORE/READINESS][OK] required bindings are present; build owners still verify canonical signatures')
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' }}

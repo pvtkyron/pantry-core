@@ -1,0 +1,66 @@
+name: Native approval input audit (read-only)
+'on':
+  workflow_dispatch:
+    inputs:
+      approved_source:
+        description: Previously approved immutable Workspace source SHA
+        type: string
+        required: true
+        default: a432a5e0a31b060368306ce4bf289305679d1ea2
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    name: Compare exact Native approval inputs without build or publication
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout input policy only
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: recipe
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Checkout current private Workspace source (metadata only)
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.MIX_REPO }}
+          token: ${{ secrets[vars.MIX_KEY_NAME] }}
+          ref: main
+          path: source
+          fetch-depth: 64
+          filter: blob:none
+          lfs: false
+          sparse-checkout: |
+            /etc/build/workspace-common.ps1
+            /Distribution/SrcVersion.ini
+          sparse-checkout-cone-mode: false
+          persist-credentials: true
+      - name: Explain ancestry and exact Git Native input differences
+        shell: pwsh
+        env:
+          PRIOR: ${{ inputs.approved_source }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:PRIOR-cnotmatch'^[0-9a-f]{40}$'){throw 'Invalid approved source SHA'}
+          $head=(& git -C source rev-parse HEAD).Trim()
+          & git -C source cat-file -e ($env:PRIOR+'^{commit}') 2>$null
+          if($LASTEXITCODE){& git -C source fetch --quiet --filter=blob:none --no-tags origin $env:PRIOR;if($LASTEXITCODE){throw 'Previous approved metadata unavailable'}}
+          & git -C source merge-base --is-ancestor $env:PRIOR $head
+          $ancestry=$LASTEXITCODE
+          . ./source/etc/build/workspace-common.ps1
+          $native=@(Get-WorkspaceNativeReleasePathspecs)
+          $policy=Get-Content ./recipe/.github/config/native-publication-inputs.json -Raw|ConvertFrom-Json
+          $exceptions=@($policy.paths | ForEach-Object{':(top,exclude)'+$_})
+          $names=@(& git -C source diff --name-only --no-renames $env:PRIOR $head -- @native)
+          if($LASTEXITCODE){throw 'Original Native scope diff failed'}
+          $filtered=@(& git -C source diff --name-only --no-renames $env:PRIOR $head -- @native @exceptions)
+          if($LASTEXITCODE){throw 'Filtered Native scope diff failed'}
+          Write-Host "[NATIVE/AUDIT] approved=$($env:PRIOR) current=$head ancestor=$($ancestry-eq0) native_scopes=$($native.Count) exceptions=$($exceptions.Count) before_exceptions=$($names.Count) after_exceptions=$($filtered.Count)"
+          foreach($p in $filtered){Write-Host "[NATIVE/AUDIT][INCLUDED] $p"}
+          foreach($p in $names){if($p-notin$filtered){Write-Host "[NATIVE/AUDIT][EXCLUDED] $p"}}
+          if($ancestry-ne0){throw 'Approved native source is not an ancestor'}
+          if($filtered.Count){throw 'Native compiler input genuinely changed; signed candidate is required'}
+          Write-Host '[NATIVE/AUDIT][PASS] Native input tree unchanged; previous signed binaries are eligible after signature verification'

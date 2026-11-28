@@ -1,0 +1,28 @@
+name: Checkpoint Pantry route state
+description: Encrypt verified generated routes without committing deliveries to Workspace
+inputs:
+  source_root:
+    required: true
+  source_sha:
+    required: true
+  key:
+    description: Canonical private state encryption credential
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Seal verified route state
+      id: seal
+      shell: bash
+      env:
+        PANTRY_ROUTE_SOURCE_ROOT: ${{ inputs.source_root }}
+        PANTRY_ROUTE_SOURCE_SHA: ${{ inputs.source_sha }}
+        PANTRY_ROUTE_STATE_KEY: ${{ inputs.key }}
+      run: bash "$GITHUB_ACTION_PATH/checkpoint.sh"
+    - name: Preserve encrypted route state
+      uses: actions/upload-artifact@v4
+      with:
+        name: kyron-route-state-${{ inputs.source_sha }}
+        path: ${{ steps.seal.outputs.sealed_path }}
+        if-no-files-found: error
+        retention-days: 90

@@ -1,0 +1,70 @@
+name: Private capsule
+description: Seal or open private source state without exposing repository identifiers
+inputs:
+  mode:
+    required: true
+  key:
+    required: true
+  payload:
+    required: false
+    default: ''
+  capsule:
+    required: false
+    default: ''
+  project:
+    required: false
+    default: ''
+  pantry-ref:
+    required: false
+    default: ''
+outputs:
+  capsule:
+    value: ${{ steps.crypto_windows.outputs.capsule || steps.crypto_other.outputs.capsule }}
+  repo:
+    value: ${{ steps.crypto_windows.outputs.repo || steps.crypto_other.outputs.repo }}
+  ref:
+    value: ${{ steps.crypto_windows.outputs.ref || steps.crypto_other.outputs.ref }}
+  workspace_repo:
+    value: ${{ steps.crypto_windows.outputs.workspace_repo || steps.crypto_other.outputs.workspace_repo }}
+  workspace_ref:
+    value: ${{ steps.crypto_windows.outputs.workspace_ref || steps.crypto_other.outputs.workspace_ref }}
+  pantry_repo:
+    value: ${{ steps.crypto_windows.outputs.pantry_repo || steps.crypto_other.outputs.pantry_repo }}
+  pantry_ref:
+    value: ${{ steps.crypto_windows.outputs.pantry_ref || steps.crypto_other.outputs.pantry_ref }}
+  sdk_repo:
+    value: ${{ steps.crypto_windows.outputs.sdk_repo || steps.crypto_other.outputs.sdk_repo }}
+  sdk_ref:
+    value: ${{ steps.crypto_windows.outputs.sdk_ref || steps.crypto_other.outputs.sdk_ref }}
+  web_repo:
+    value: ${{ steps.crypto_windows.outputs.web_repo || steps.crypto_other.outputs.web_repo }}
+  web_ref:
+    value: ${{ steps.crypto_windows.outputs.web_ref || steps.crypto_other.outputs.web_ref }}
+runs:
+  using: composite
+  steps:
+    - name: Protect private source state
+      id: crypto_windows
+      if: ${{ runner.os == 'Windows' }}
+      shell: powershell
+      env:
+        CAPSULE_MODE: ${{ inputs.mode }}
+        CAPSULE_KEY: ${{ inputs.key }}
+        CAPSULE_PAYLOAD: ${{ inputs.payload }}
+        CAPSULE_VALUE: ${{ inputs.capsule }}
+        CAPSULE_PROJECT: ${{ inputs.project }}
+        CAPSULE_PANTRY_REF: ${{ inputs.pantry-ref }}
+      run: '& "$env:GITHUB_ACTION_PATH\capsule.ps1"'
+
+    - name: Protect private source state
+      id: crypto_other
+      if: ${{ runner.os != 'Windows' }}
+      shell: pwsh
+      env:
+        CAPSULE_MODE: ${{ inputs.mode }}
+        CAPSULE_KEY: ${{ inputs.key }}
+        CAPSULE_PAYLOAD: ${{ inputs.payload }}
+        CAPSULE_VALUE: ${{ inputs.capsule }}
+        CAPSULE_PROJECT: ${{ inputs.project }}
+        CAPSULE_PANTRY_REF: ${{ inputs.pantry-ref }}
+      run: '& "$env:GITHUB_ACTION_PATH/capsule.ps1"'

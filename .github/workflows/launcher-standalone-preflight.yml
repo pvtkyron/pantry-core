@@ -1,0 +1,114 @@
+name: KYRON Standalone Launcher (unpublished preflight)
+'on':
+  workflow_dispatch: null
+permissions:
+  contents: read
+concurrency:
+  group: kyron-standalone-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  managed:
+    if: ${{ github.repository == 'pvtkyron/pantry-core' && github.ref == 'refs/heads/main' }}
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+    - name: Open only active standalone sources in disposable GitHub runner
+      uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+        fetch-depth: 1
+        sparse-checkout: |
+          Launcher/jni/runtime/client/ClientMode.cpp
+          Launcher/jni/runtime/client/managed
+          Launcher/jni/tests/StandaloneMaintenanceTests
+          Launcher/jni/tests/NetworkOnlyTests
+          Launcher/jni/tests/LauncherExitTests
+          Launcher/jni/tests/GameLoopAdbResolverTests
+          Launcher/jni/tests/CommandCaptureTests
+          Launcher/jni/tests/CapturedCommandTests.cpp
+          Launcher/jni/platform/windows
+          Launcher/build/msbuild/Launcher.NativeCommandTests.targets
+          Shared/FirefoxVpnCore
+          etc/build
+          etc/DeviceEnrollmentWorker/Kyron-DeviceEnrollment.ps1
+          etc/DeviceEnrollmentWorker/Kyron-DeviceInventory.ps1
+          Launcher/Directory.Build.props
+          Directory.Build.props
+        sparse-checkout-cone-mode: false
+        repository: ${{ secrets.MIX_REPO }}
+        token: ${{ secrets[vars.MIX_KEY_NAME] }}
+        ref: ${{ github.event.client_payload.workspace_sha || 'main' }}
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+    - name: Verify current embedded managed authority and fail-closed readiness
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $f=[IO.File]::ReadAllText('Launcher/jni/runtime/client/ClientMode.cpp')
+        foreach($required in @(
+          'EmbeddedManagedHost managed;',
+          'if(!managed.Load())',
+          'if(!managed.Preflight())',
+          'if(preflightOnly){',
+          'CommitActiveBuildReceipt()',
+          'if(!managed.Start()||!SessionBelongsToSelf(12000))',
+          'if(!managed.CommitStartup())',
+          'if(!ensureUi(candidate||bootstrapOrigin))',
+          'life.CommitOwner()'
+        )){
+          if(!$f.Contains($required)){throw "Embedded standalone authority invariant drifted: $required"}
+        }
+        if($f.Contains('stageCore=!networkOnly')){throw 'Legacy external Core staging returned'}
+        Write-Host '[KYRON][STANDALONE][NATIVE-AUTHORITY][OK]'
+    - name: Compile current embedded standalone runtime
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        dotnet build Launcher/jni/runtime/client/managed/KyronLauncherRuntime.csproj --configuration Release --framework net8.0-windows10.0.19041.0 --no-self-contained --nologo -p:Platform=x64 -p:NuGetAudit=false -v:minimal
+        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+        Write-Host '[KYRON][STANDALONE][MANAGED][OK]'
+    - name: Provision locked MinGW for test-only native command capture fixture
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        & ./etc/build/setup-windows-toolchain.ps1 -SdkRoot 'D:\kyron-sdk'
+        if($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath 'D:\kyron-sdk\LLVMMinGW\20260908\bin\clang++.exe' -PathType Leaf)){throw 'Pinned native fixture compiler unavailable'}
+        # Persist this pinned toolchain's DLL search path into subsequent test steps.
+        $mingwBin='D:\kyron-sdk\LLVMMinGW\20260908\bin'
+        Add-Content -LiteralPath $env:GITHUB_PATH -Value $mingwBin
+        Write-Host '[KYRON][NATIVE-FIXTURE-RUNTIME][READY]'
+        Write-Host '[KYRON][STANDALONE][NATIVE-FIXTURE-TOOLCHAIN][OK]'
+    - name: Test native command capture and fail-closed child ownership
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        dotnet run --project Launcher/jni/tests/CommandCaptureTests/KyronCommandCaptureTests.csproj --configuration Release --property:Platform=x64
+        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+        Write-Host '[KYRON][STANDALONE][NATIVE-COMMAND][OK]'
+    - name: Test Core-free maintenance input policy without running production native host
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $project='Launcher/jni/tests/StandaloneMaintenanceTests/StandaloneMaintenanceTests.csproj'
+        dotnet run --project $project --configuration Release --property:Platform=x64 -- --hosts-fixture
+        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+        dotnet run --project $project --no-build --configuration Release --property:Platform=x64 -- --network-input-fixture
+        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+        Write-Host '[KYRON][STANDALONE][MAINTENANCE-FIXTURES][OK]'
+    - name: Test strict exit receipts and GameLoop pinned ADB ownership
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        dotnet run --project Launcher/jni/tests/LauncherExitTests/KyronLauncherExitTests.csproj --configuration Release --property:Platform=x64
+        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+        dotnet run --project Launcher/jni/tests/GameLoopAdbResolverTests/GameLoopAdbResolverTests.csproj --configuration Release --property:Platform=x64
+        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+        Write-Host '[KYRON][STANDALONE][EXIT-AND-ADB][OK]'
+    - name: Test isolated network-only owner lifecycle without live tunnel
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        dotnet run --project Launcher/jni/tests/NetworkOnlyTests/KyronNetworkOnlyTests.csproj --configuration Release --property:Platform=x64
+        if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+        Write-Host '[KYRON][STANDALONE][NETWORK-LIFECYCLE][OK]'
